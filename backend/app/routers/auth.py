@@ -63,13 +63,9 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
     if payload.role == UserRole.customer:
         db.add(CustomerProfile(user_id=user.id, name=user.full_name))
     else:
-        db.add(
-            ProviderProfile(
-                user_id=user.id,
-                name=user.full_name,
-                service_category=payload.service_category,
-            )
-        )
+        # service_category is no longer collected at signup — the provider
+        # sets it later via the profile edit flow (PUT /api/profile/me).
+        db.add(ProviderProfile(user_id=user.id, name=user.full_name))
 
     try:
         db.commit()

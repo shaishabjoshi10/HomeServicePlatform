@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../main.dart';
 import '../services/auth_service.dart';
-import '../services/provider_service.dart';
 import 'login.dart';
 
 class SignupPage extends StatefulWidget {
@@ -19,9 +18,6 @@ class _SignupPageState extends State<SignupPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  final _customCategoryController = TextEditingController();
-
-  static const String _otherCategoryValue = 'Other';
 
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
@@ -29,34 +25,12 @@ class _SignupPageState extends State<SignupPage> {
   bool _submitted = false;
   String? _errorMessage;
 
-  List<String> _categories = [];
-  bool _loadingCategories = true;
-  String? _selectedCategory;
-
-  @override
-  void initState() {
-    super.initState();
-    if (widget.role == UserRole.provider) {
-      _loadCategories();
-    }
-  }
-
-  Future<void> _loadCategories() async {
-    final categories = await ProviderService.getCategories();
-    if (!mounted) return;
-    setState(() {
-      _categories = [...categories, _otherCategoryValue];
-      _loadingCategories = false;
-    });
-  }
-
   @override
   void dispose() {
     _nameController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
-    _customCategoryController.dispose();
     super.dispose();
   }
 
@@ -94,31 +68,6 @@ class _SignupPageState extends State<SignupPage> {
     return null;
   }
 
-  String? _validateCategory(String? value) {
-    if (widget.role != UserRole.provider) return null;
-    if (value == null || value.isEmpty) return 'Select the type of service you offer';
-    return null;
-  }
-
-  String? _validateCustomCategory(String? value) {
-    if (widget.role != UserRole.provider) return null;
-    if (_selectedCategory != _otherCategoryValue) return null;
-    final v = value?.trim() ?? '';
-    if (v.isEmpty) return 'Enter your service type';
-    if (v.length < 2) return 'Service type is too short';
-    return null;
-  }
-
-  /// The value actually sent to the backend: the predefined category, or
-  /// the custom text if "Other" was picked.
-  String? get _resolvedServiceCategory {
-    if (widget.role != UserRole.provider) return null;
-    if (_selectedCategory == _otherCategoryValue) {
-      return _customCategoryController.text.trim();
-    }
-    return _selectedCategory;
-  }
-
   Future<void> _handleSignup() async {
     setState(() {
       _errorMessage = null;
@@ -137,7 +86,6 @@ class _SignupPageState extends State<SignupPage> {
         identifier: _emailController.text,
         password: _passwordController.text,
         role: roleString,
-        serviceCategory: _resolvedServiceCategory,
       );
 
       if (!mounted) return;
@@ -268,48 +216,6 @@ class _SignupPageState extends State<SignupPage> {
                         icon: Icons.badge_outlined,
                       ),
                     ),
-                    if (widget.role == UserRole.provider) ...[
-                      const SizedBox(height: 20),
-                      const Text(
-                        'Type of Service You Offer',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: kDarkText),
-                      ),
-                      const SizedBox(height: 8),
-                      _loadingCategories
-                          ? Container(
-                              padding: const EdgeInsets.symmetric(vertical: 16),
-                              alignment: Alignment.centerLeft,
-                              child: const SizedBox(
-                                height: 18,
-                                width: 18,
-                                child: CircularProgressIndicator(strokeWidth: 2, color: kPrimaryGreen),
-                              ),
-                            )
-                          : DropdownButtonFormField<String>(
-                              value: _selectedCategory,
-                              validator: _validateCategory,
-                              decoration: _fieldDecoration(
-                                hint: 'Select a service category',
-                                icon: Icons.handyman_outlined,
-                              ),
-                              items: _categories
-                                  .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                                  .toList(),
-                              onChanged: (value) => setState(() => _selectedCategory = value),
-                            ),
-                      if (_selectedCategory == _otherCategoryValue) ...[
-                        const SizedBox(height: 12),
-                        TextFormField(
-                          controller: _customCategoryController,
-                          textCapitalization: TextCapitalization.words,
-                          validator: _validateCustomCategory,
-                          decoration: _fieldDecoration(
-                            hint: 'Enter your service type (e.g. Roofing)',
-                            icon: Icons.edit_outlined,
-                          ),
-                        ),
-                      ],
-                    ],
                     const SizedBox(height: 20),
                     const Text(
                       'Email or Phone Number',

@@ -66,15 +66,12 @@ class AuthService {
     required String identifier,
     required String password,
     required String role,
-    String? serviceCategory,
   }) {
     return _post('/signup', {
       'full_name': fullName.trim(),
       'identifier': identifier.trim(),
       'password': password,
       'role': role,
-      if (serviceCategory != null && serviceCategory.trim().isNotEmpty)
-        'service_category': serviceCategory.trim(),
     });
   }
 
@@ -84,10 +81,10 @@ class AuthService {
     try {
       response = await http
           .post(
-            Uri.parse('$_baseUrl$path'),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode(body),
-          )
+        Uri.parse('$_baseUrl$path'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(body),
+      )
           .timeout(const Duration(seconds: 15));
     } on TimeoutException {
       throw AuthException('Request timed out. Please check your connection.');

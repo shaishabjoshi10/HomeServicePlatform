@@ -4,6 +4,8 @@ import '../models/booking.dart';
 import '../models/provider_profile.dart';
 import '../services/booking_service.dart';
 import '../services/provider_service.dart';
+import 'booking_detail_sheet.dart';
+import 'provider_bookings.dart';
 import 'role_selection.dart';
 
 class ServiceProviderHomePage extends StatefulWidget {
@@ -128,6 +130,15 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
       _showProfileMenu(context);
       return;
     }
+    if (index == 1) {
+      // "Bookings" — pushes the full list instead of switching an in-page tab,
+      // since Earnings/Messages don't have their own screens built yet.
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => ProviderBookingsPage(accessToken: widget.accessToken)),
+      ).then((_) => _loadBookings());
+      return;
+    }
     setState(() => _navIndex = index);
   }
 
@@ -148,133 +159,133 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                Container(
-                  width: 40,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 16),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(2),
+                  Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
                   ),
-                ),
-                Row(
-                  children: [
-                    Container(
-                      width: 52,
-                      height: 52,
-                      decoration: const BoxDecoration(color: kLightGreenBg, shape: BoxShape.circle),
-                      child: const Icon(Icons.engineering_rounded, color: kPrimaryGreen, size: 26),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(widget.providerName,
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                          Row(
-                            children: [
-                              const Icon(Icons.star_rounded, size: 14, color: Colors.amber),
-                              const SizedBox(width: 2),
-                              Text(
-                                _loadingProfile
-                                    ? 'Loading…'
-                                    : _profile != null
-                                        ? '${_profile!.rating.toStringAsFixed(1)} Rating (${_profile!.reviewsCount})'
-                                        : '— Rating',
-                                style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-                              ),
-                            ],
-                          ),
-                        ],
+                  Row(
+                    children: [
+                      Container(
+                        width: 52,
+                        height: 52,
+                        decoration: const BoxDecoration(color: kLightGreenBg, shape: BoxShape.circle),
+                        child: const Icon(Icons.engineering_rounded, color: kPrimaryGreen, size: 26),
                       ),
-                    ),
-                  ],
-                ),
-                const Divider(height: 32),
-                _ProfileMenuTile(
-                  icon: Icons.person_outline_rounded,
-                  label: 'Edit Profile',
-                  onTap: () {
-                    Navigator.pop(context);
-                    // TODO: navigate to edit profile page
-                  },
-                ),
-                _ProfileMenuTile(
-                  icon: Icons.build_outlined,
-                  label: 'Manage Services',
-                  onTap: () {
-                    Navigator.pop(context);
-                    // TODO: navigate to manage services page
-                  },
-                ),
-                _ProfileMenuTile(
-                  icon: Icons.event_available_outlined,
-                  label: 'Availability & Schedule',
-                  onTap: () {
-                    Navigator.pop(context);
-                    // TODO: navigate to availability settings
-                  },
-                ),
-                _ProfileMenuTile(
-                  icon: Icons.account_balance_wallet_outlined,
-                  label: 'Earnings & Payouts',
-                  onTap: () {
-                    Navigator.pop(context);
-                    // TODO: navigate to earnings page
-                  },
-                ),
-                _ProfileMenuTile(
-                  icon: Icons.history_rounded,
-                  label: 'Job History',
-                  onTap: () {
-                    Navigator.pop(context);
-                    // TODO: navigate to job history page
-                  },
-                ),
-                _ProfileMenuTile(
-                  icon: Icons.verified_user_outlined,
-                  label: 'Verification & Documents',
-                  onTap: () {
-                    Navigator.pop(context);
-                    // TODO: navigate to verification page
-                  },
-                ),
-                _ProfileMenuTile(
-                  icon: Icons.notifications_outlined,
-                  label: 'Notifications',
-                  onTap: () {
-                    Navigator.pop(context);
-                    // TODO: navigate to notifications settings
-                  },
-                ),
-                _ProfileMenuTile(
-                  icon: Icons.help_outline_rounded,
-                  label: 'Help & Support',
-                  onTap: () {
-                    Navigator.pop(context);
-                    // TODO: navigate to help page
-                  },
-                ),
-                _ProfileMenuTile(
-                  icon: Icons.settings_outlined,
-                  label: 'Settings',
-                  onTap: () {
-                    Navigator.pop(context);
-                    // TODO: navigate to settings page
-                  },
-                ),
-                const Divider(height: 24),
-                _ProfileMenuTile(
-                  icon: Icons.logout_rounded,
-                  label: 'Log Out',
-                  isDestructive: true,
-                  onTap: () {
-                    Navigator.pop(context);
-                    _confirmLogout(pageContext);
-                  },
-                ),
-                const SizedBox(height: 8),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(widget.providerName,
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                            Row(
+                              children: [
+                                const Icon(Icons.star_rounded, size: 14, color: Colors.amber),
+                                const SizedBox(width: 2),
+                                Text(
+                                  _loadingProfile
+                                      ? 'Loading…'
+                                      : _profile != null
+                                      ? '${_profile!.rating.toStringAsFixed(1)} Rating (${_profile!.reviewsCount})'
+                                      : '— Rating',
+                                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 32),
+                  _ProfileMenuTile(
+                    icon: Icons.person_outline_rounded,
+                    label: 'Edit Profile',
+                    onTap: () {
+                      Navigator.pop(context);
+                      // TODO: navigate to edit profile page
+                    },
+                  ),
+                  _ProfileMenuTile(
+                    icon: Icons.build_outlined,
+                    label: 'Manage Services',
+                    onTap: () {
+                      Navigator.pop(context);
+                      // TODO: navigate to manage services page
+                    },
+                  ),
+                  _ProfileMenuTile(
+                    icon: Icons.event_available_outlined,
+                    label: 'Availability & Schedule',
+                    onTap: () {
+                      Navigator.pop(context);
+                      // TODO: navigate to availability settings
+                    },
+                  ),
+                  _ProfileMenuTile(
+                    icon: Icons.account_balance_wallet_outlined,
+                    label: 'Earnings & Payouts',
+                    onTap: () {
+                      Navigator.pop(context);
+                      // TODO: navigate to earnings page
+                    },
+                  ),
+                  _ProfileMenuTile(
+                    icon: Icons.history_rounded,
+                    label: 'Job History',
+                    onTap: () {
+                      Navigator.pop(context);
+                      // TODO: navigate to job history page
+                    },
+                  ),
+                  _ProfileMenuTile(
+                    icon: Icons.verified_user_outlined,
+                    label: 'Verification & Documents',
+                    onTap: () {
+                      Navigator.pop(context);
+                      // TODO: navigate to verification page
+                    },
+                  ),
+                  _ProfileMenuTile(
+                    icon: Icons.notifications_outlined,
+                    label: 'Notifications',
+                    onTap: () {
+                      Navigator.pop(context);
+                      // TODO: navigate to notifications settings
+                    },
+                  ),
+                  _ProfileMenuTile(
+                    icon: Icons.help_outline_rounded,
+                    label: 'Help & Support',
+                    onTap: () {
+                      Navigator.pop(context);
+                      // TODO: navigate to help page
+                    },
+                  ),
+                  _ProfileMenuTile(
+                    icon: Icons.settings_outlined,
+                    label: 'Settings',
+                    onTap: () {
+                      Navigator.pop(context);
+                      // TODO: navigate to settings page
+                    },
+                  ),
+                  const Divider(height: 24),
+                  _ProfileMenuTile(
+                    icon: Icons.logout_rounded,
+                    label: 'Log Out',
+                    isDestructive: true,
+                    onTap: () {
+                      Navigator.pop(context);
+                      _confirmLogout(pageContext);
+                    },
+                  ),
+                  const SizedBox(height: 8),
                 ],
               ),
             ),
@@ -309,7 +320,7 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (_) => const RoleSelectionPage()),
-        (route) => false,
+            (route) => false,
       );
     }
   }
@@ -474,8 +485,8 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                         value: _loadingProfile
                             ? '…'
                             : _profile != null
-                                ? _profile!.rating.toStringAsFixed(1)
-                                : '—',
+                            ? _profile!.rating.toStringAsFixed(1)
+                            : '—',
                         label: 'Your Rating',
                       ),
                     ],
@@ -497,59 +508,68 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
-                    (context, index) {
+                        (context, index) {
                       final b = _pendingBookings[index];
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 12),
-                        child: Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.grey.shade200),
-                            borderRadius: BorderRadius.circular(16),
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () => showBookingDetailSheet(
+                            context,
+                            booking: b,
+                            onAccept: () => _respondToBooking(b, 'accepted'),
+                            onDecline: () => _respondToBooking(b, 'rejected'),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(b.customerName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                              if (b.serviceCategory != null) ...[
-                                const SizedBox(height: 2),
-                                Text(b.serviceCategory!, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                              ],
-                              const SizedBox(height: 6),
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Icon(Icons.location_on_outlined, size: 13, color: Colors.grey.shade600),
-                                  const SizedBox(width: 4),
-                                  Expanded(
-                                    child: Text(b.address, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                                  ),
+                          child: Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              border: Border.all(color: Colors.grey.shade200),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(b.customerName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                                if (b.serviceCategory != null) ...[
+                                  const SizedBox(height: 2),
+                                  Text(b.serviceCategory!, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
                                 ],
-                              ),
-                              const SizedBox(height: 12),
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: OutlinedButton(
-                                      onPressed: () => _respondToBooking(b, 'rejected'),
-                                      style: OutlinedButton.styleFrom(
-                                        foregroundColor: Colors.red.shade600,
-                                        side: BorderSide(color: Colors.red.shade200),
+                                const SizedBox(height: 6),
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Icon(Icons.location_on_outlined, size: 13, color: Colors.grey.shade600),
+                                    const SizedBox(width: 4),
+                                    Expanded(
+                                      child: Text(b.address, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 12),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: OutlinedButton(
+                                        onPressed: () => _respondToBooking(b, 'rejected'),
+                                        style: OutlinedButton.styleFrom(
+                                          foregroundColor: Colors.red.shade600,
+                                          side: BorderSide(color: Colors.red.shade200),
+                                        ),
+                                        child: const Text('Decline'),
                                       ),
-                                      child: const Text('Decline'),
                                     ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: FilledButton(
-                                      onPressed: () => _respondToBooking(b, 'accepted'),
-                                      style: FilledButton.styleFrom(backgroundColor: kPrimaryGreen),
-                                      child: const Text('Accept'),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: FilledButton(
+                                        onPressed: () => _respondToBooking(b, 'accepted'),
+                                        style: FilledButton.styleFrom(backgroundColor: kPrimaryGreen),
+                                        child: const Text('Accept'),
+                                      ),
                                     ),
-                                  ),
-                                ],
-                              ),
-                            ],
+                                  ],
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       );
@@ -579,80 +599,87 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                 padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
                 child: _acceptedBookings.isEmpty
                     ? Container(
-                        padding: const EdgeInsets.symmetric(vertical: 28),
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey.shade200),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Column(
-                          children: [
-                            Icon(Icons.event_busy_outlined, size: 28, color: Colors.grey.shade400),
-                            const SizedBox(height: 8),
-                            Text(
-                              'No appointments scheduled for today.',
-                              style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-                            ),
-                          ],
-                        ),
-                      )
+                  padding: const EdgeInsets.symmetric(vertical: 28),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey.shade200),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    children: [
+                      Icon(Icons.event_busy_outlined, size: 28, color: Colors.grey.shade400),
+                      const SizedBox(height: 8),
+                      Text(
+                        'No appointments scheduled for today.',
+                        style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                )
                     : Container(
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey.shade200),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: Column(
-                          children: List.generate(_acceptedBookings.length, (i) {
-                            final b = _acceptedBookings[i];
-                            return Column(
-                              children: [
-                                Padding(
-                                  padding: const EdgeInsets.all(14),
-                                  child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey.shade200),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    children: List.generate(_acceptedBookings.length, (i) {
+                      final b = _acceptedBookings[i];
+                      return Column(
+                        children: [
+                          InkWell(
+                            onTap: () => showBookingDetailSheet(
+                              context,
+                              booking: b,
+                              onComplete: () => _respondToBooking(b, 'completed'),
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.all(14),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(b.customerName,
+                                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                                        const SizedBox(height: 2),
+                                        if (b.serviceCategory != null)
+                                          Text(b.serviceCategory!,
+                                              style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                                        const SizedBox(height: 2),
+                                        Row(
                                           children: [
-                                            Text(b.customerName,
-                                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                                            const SizedBox(height: 2),
-                                            if (b.serviceCategory != null)
-                                              Text(b.serviceCategory!,
+                                            Icon(Icons.location_on_outlined, size: 13, color: Colors.grey.shade600),
+                                            const SizedBox(width: 3),
+                                            Expanded(
+                                              child: Text(b.address,
                                                   style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                                            const SizedBox(height: 2),
-                                            Row(
-                                              children: [
-                                                Icon(Icons.location_on_outlined, size: 13, color: Colors.grey.shade600),
-                                                const SizedBox(width: 3),
-                                                Expanded(
-                                                  child: Text(b.address,
-                                                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                                                ),
-                                              ],
                                             ),
                                           ],
                                         ),
-                                      ),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: kLightGreenBg,
-                                          borderRadius: BorderRadius.circular(20),
-                                        ),
-                                        child: const Text('Confirmed',
-                                            style: TextStyle(fontSize: 11, color: kPrimaryGreen, fontWeight: FontWeight.w600)),
-                                      ),
-                                    ],
+                                      ],
+                                    ),
                                   ),
-                                ),
-                                if (i != _acceptedBookings.length - 1) Divider(height: 1, color: Colors.grey.shade200),
-                              ],
-                            );
-                          }),
-                        ),
-                      ),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: kLightGreenBg,
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: const Text('Confirmed',
+                                        style: TextStyle(fontSize: 11, color: kPrimaryGreen, fontWeight: FontWeight.w600)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          if (i != _acceptedBookings.length - 1) Divider(height: 1, color: Colors.grey.shade200),
+                        ],
+                      );
+                    }),
+                  ),
+                ),
               ),
             ),
             SliverPadding(

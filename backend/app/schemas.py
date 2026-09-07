@@ -2,7 +2,7 @@ import re
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.models import BookingStatus, UserRole, VerificationStatus
 
@@ -29,31 +29,11 @@ class SignupRequest(BaseModel):
     identifier: str = Field(min_length=3, description="Email address or phone number")
     password: str = Field(min_length=6, max_length=128)
     role: UserRole
-    service_category: str | None = Field(
-        default=None,
-        max_length=100,
-        description="Type of service offered — required when role is 'provider'. "
-        "Pick from a predefined list or a custom value (e.g. from an 'Other' option).",
-    )
 
     @field_validator("identifier")
     @classmethod
     def normalize_identifier(cls, v: str) -> str:
         return _validate_identifier(v)
-
-    @field_validator("service_category")
-    @classmethod
-    def normalize_service_category(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        v = v.strip()
-        return v or None
-
-    @model_validator(mode="after")
-    def require_service_category_for_providers(self):
-        if self.role == UserRole.provider and not self.service_category:
-            raise ValueError("Select the type of service you offer")
-        return self
 
 
 class LoginRequest(BaseModel):
@@ -89,6 +69,8 @@ class CustomerProfileOut(BaseModel):
     user_id: uuid.UUID
     name: str
     address: str | None
+    latitude: float | None
+    longitude: float | None
 
     model_config = {"from_attributes": True}
 
@@ -117,6 +99,8 @@ class ProfileUpdateRequest(BaseModel):
 
     name: str | None = Field(default=None, min_length=2, max_length=255)
     address: str | None = Field(default=None, max_length=500)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
     service_category: str | None = Field(default=None, max_length=100)
     experience: int | None = Field(default=None, ge=0, le=80)
     availability: bool | None = None

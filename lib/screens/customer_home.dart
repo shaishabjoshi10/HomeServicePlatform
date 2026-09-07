@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
+
 import '../main.dart';
+import '../models/customer_profile.dart';
 import '../models/provider_profile.dart';
 import '../services/booking_service.dart';
+import '../services/profile_service.dart';
 import '../services/provider_service.dart';
 import 'location_picker.dart';
 import 'my_bookings.dart';
@@ -53,6 +56,8 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
   bool _loadingProfessionals = true;
   String? _professionalsError;
 
+  PickedLocation? _defaultLocation;
+
   Future<void> _loadProfessionals() async {
     setState(() {
       _loadingProfessionals = true;
@@ -78,6 +83,63 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
         _professionalsError = 'Something went wrong loading service providers.';
         _loadingProfessionals = false;
       });
+    }
+  }
+
+  Future<void> _loadDefaultLocation() async {
+    try {
+      final profile = await ProfileService.getMyProfile(widget.accessToken);
+      if (!mounted) return;
+      if (profile.latitude != null && profile.longitude != null && profile.address != null) {
+        setState(() {
+          _defaultLocation = PickedLocation(
+            latitude: profile.latitude!,
+            longitude: profile.longitude!,
+            address: profile.address!,
+          );
+        });
+      }
+    } catch (_) {
+      // Default location is a convenience, not critical — fail silently and
+      // let the user just pick a location per-booking as before.
+    }
+  }
+
+  Future<void> _setDefaultLocation() async {
+    final result = await Navigator.push<PickedLocation>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LocationPickerPage(
+          initialLocation: _defaultLocation != null
+              ? LatLng(_defaultLocation!.latitude, _defaultLocation!.longitude)
+              : null,
+        ),
+      ),
+    );
+    if (result == null) return;
+
+    setState(() => _defaultLocation = result);
+
+    try {
+      await ProfileService.updateDefaultLocation(
+        accessToken: widget.accessToken,
+        address: result.address,
+        latitude: result.latitude,
+        longitude: result.longitude,
+      );
+    } on ProfileServiceException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Colors.red.shade600),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not save your default location.'),
+          backgroundColor: Colors.red,
+        ),
+      );
     }
   }
 
@@ -192,6 +254,7 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
     super.initState();
     _searchController.addListener(_onSearchChanged);
     _loadProfessionals();
+    _loadDefaultLocation();
   }
 
   @override
@@ -254,7 +317,7 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
     final formKey = GlobalKey<FormState>();
     DateTime? preferredDate;
     TimeOfDay? preferredTime;
-    PickedLocation? pickedLocation;
+    PickedLocation? pickedLocation = _defaultLocation;
 
     await showModalBottomSheet(
       context: context,
@@ -696,14 +759,25 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.location_on_outlined, color: kPrimaryGreen, size: 18),
-                        const SizedBox(width: 4),
-                        Text('Kathmandu, Nepal',
-                            style: TextStyle(fontSize: 13, color: Colors.grey.shade800)),
-                        const Icon(Icons.keyboard_arrow_down_rounded, size: 16),
-                      ],
+                    InkWell(
+                      onTap: _setDefaultLocation,
+                      borderRadius: BorderRadius.circular(8),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.location_on_outlined, color: kPrimaryGreen, size: 18),
+                          const SizedBox(width: 4),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 110),
+                            child: Text(
+                              _defaultLocation?.address ?? 'Kathmandu, Nepal',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 13, color: Colors.grey.shade800),
+                            ),
+                          ),
+                          const Icon(Icons.keyboard_arrow_down_rounded, size: 16),
+                        ],
+                      ),
                     ),
                     Row(
                       children: [

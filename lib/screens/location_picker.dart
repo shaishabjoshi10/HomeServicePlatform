@@ -25,6 +25,19 @@ class PickedLocation {
 // Default map center when we can't get the device's location — central Kathmandu.
 const LatLng _kathmanduFallback = LatLng(27.7172, 85.3240);
 
+/// One row returned by the place-search box (Nominatim's forward geocoder).
+class _SearchResult {
+  final String displayName;
+  final double latitude;
+  final double longitude;
+
+  const _SearchResult({
+    required this.displayName,
+    required this.latitude,
+    required this.longitude,
+  });
+}
+
 /// Full-screen map picker: the map pans under a fixed center pin, the
 /// address for whatever's under the pin is reverse-geocoded live, and
 /// "Confirm Location" hands both the coordinates and address back.
@@ -40,17 +53,22 @@ class LocationPickerPage extends StatefulWidget {
 
 class _LocationPickerPageState extends State<LocationPickerPage> {
   final MapController _mapController = MapController();
+  final _searchController = TextEditingController();
 
   late LatLng _center = widget.initialLocation ?? _kathmanduFallback;
   String _address = 'Move the map to choose a location';
   bool _resolvingAddress = false;
   bool _locatingDevice = false;
 
+  List<_SearchResult> _searchResults = [];
+  bool _searching = false;
+
   Timer? _debounce;
 
   @override
   void initState() {
     super.initState();
+    _searchController.addListener(() => setState(() {}));
     if (widget.initialLocation != null) {
       _resolveAddress(_center);
     } else {
@@ -61,6 +79,7 @@ class _LocationPickerPageState extends State<LocationPickerPage> {
   @override
   void dispose() {
     _debounce?.cancel();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -146,6 +165,67 @@ class _LocationPickerPageState extends State<LocationPickerPage> {
   String _fallbackLabel(LatLng point) =>
       '${point.latitude.toStringAsFixed(5)}, ${point.longitude.toStringAsFixed(5)}';
 
+  Future<void> _performSearch(String query) async {
+    final q = query.trim();
+    if (q.isEmpty) {
+      setState(() => _searchResults = []);
+      return;
+    }
+    setState(() => _searching = true);
+    try {
+      final uri = Uri.parse(
+        'https://nominatim.openstreetmap.org/search'
+            '?q=${Uri.encodeQueryComponent(q)}&format=json&limit=6&addressdetails=0&countrycodes=np',
+      );
+      // Nominatim's usage policy requires a real User-Agent identifying the app.
+      final response = await http
+          .get(uri, headers: {'User-Agent': 'GharSewaApp/1.0'})
+          .timeout(const Duration(seconds: 8));
+
+      if (response.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
+        if (!mounted) return;
+        setState(() {
+          _searchResults = data
+              .map((e) => _SearchResult(
+            displayName: e['display_name'] as String,
+            latitude: double.parse(e['lat'] as String),
+            longitude: double.parse(e['lon'] as String),
+          ))
+              .toList();
+          _searching = false;
+        });
+        return;
+      }
+    } catch (_) {
+      // fall through to the empty-results state below
+    }
+    if (!mounted) return;
+    setState(() {
+      _searchResults = [];
+      _searching = false;
+    });
+  }
+
+  void _selectSearchResult(_SearchResult result) {
+    final point = LatLng(result.latitude, result.longitude);
+    _mapController.move(point, 16);
+    setState(() {
+      _center = point;
+      _address = result.displayName;
+      _searchResults = [];
+      _searchController.clear();
+    });
+    FocusScope.of(context).unfocus();
+  }
+
+  void _clearSearch() {
+    setState(() {
+      _searchController.clear();
+      _searchResults = [];
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -179,6 +259,83 @@ class _LocationPickerPageState extends State<LocationPickerPage> {
                 padding: const EdgeInsets.only(bottom: 36),
                 child: Icon(Icons.location_on_rounded, color: kPrimaryGreen, size: 44),
               ),
+            ),
+          ),
+
+          // Search box + results — type an area name and jump the map there.
+          Positioned(
+            top: 12,
+            left: 16,
+            right: 16,
+            child: Column(
+              children: [
+                Material(
+                  elevation: 3,
+                  borderRadius: BorderRadius.circular(14),
+                  child: TextField(
+                    controller: _searchController,
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: _performSearch,
+                    decoration: InputDecoration(
+                      hintText: 'Search for an area or place',
+                      prefixIcon: const Icon(Icons.search_rounded, color: kPrimaryGreen),
+                      suffixIcon: _searchController.text.isNotEmpty
+                          ? IconButton(
+                        icon: const Icon(Icons.close_rounded),
+                        onPressed: _clearSearch,
+                      )
+                          : null,
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(14),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                ),
+                if (_searching || _searchResults.isNotEmpty)
+                  Container(
+                    margin: const EdgeInsets.only(top: 8),
+                    constraints: const BoxConstraints(maxHeight: 240),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(14),
+                      boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 10)],
+                    ),
+                    child: _searching
+                        ? const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Center(
+                        child: SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: kPrimaryGreen),
+                        ),
+                      ),
+                    )
+                        : ListView.separated(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      itemCount: _searchResults.length,
+                      separatorBuilder: (_, __) => Divider(height: 1, color: Colors.grey.shade200),
+                      itemBuilder: (context, index) {
+                        final result = _searchResults[index];
+                        return ListTile(
+                          dense: true,
+                          leading: const Icon(Icons.place_outlined, color: kPrimaryGreen),
+                          title: Text(
+                            result.displayName,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                          onTap: () => _selectSearchResult(result),
+                        );
+                      },
+                    ),
+                  ),
+              ],
             ),
           ),
 

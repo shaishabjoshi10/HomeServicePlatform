@@ -49,6 +49,10 @@ def update_my_profile(
             profile.name = payload.name
         if payload.address is not None:
             profile.address = payload.address
+        if payload.latitude is not None:
+            profile.latitude = payload.latitude
+        if payload.longitude is not None:
+            profile.longitude = payload.longitude
 
         db.commit()
         db.refresh(profile)
