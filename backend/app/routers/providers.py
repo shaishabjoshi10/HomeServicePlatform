@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.constants import SERVICE_CATEGORIES
 from app.database import get_db
 from app.models import ProviderProfile, VerificationStatus
-from app.schemas import ProviderProfileOut
+from app.schemas import ProviderPublicOut
 
 router = APIRouter(prefix="/api/providers", tags=["providers"])
 
@@ -17,7 +17,7 @@ def list_service_categories():
     return SERVICE_CATEGORIES
 
 
-@router.get("", response_model=list[ProviderProfileOut])
+@router.get("", response_model=list[ProviderPublicOut])
 def list_providers(
     service_category: str | None = Query(default=None, description="Filter by category, partial match"),
     available_only: bool = Query(default=False),
@@ -38,7 +38,7 @@ def list_providers(
     return query.all()
 
 
-@router.get("/{provider_id}", response_model=ProviderProfileOut)
+@router.get("/{provider_id}", response_model=ProviderPublicOut)
 def get_provider(provider_id: str, db: Session = Depends(get_db)):
     profile = db.query(ProviderProfile).filter(ProviderProfile.id == provider_id).first()
     if not profile:

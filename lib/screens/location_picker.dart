@@ -318,7 +318,7 @@ class _LocationPickerPageState extends State<LocationPickerPage> {
                       shrinkWrap: true,
                       padding: const EdgeInsets.symmetric(vertical: 4),
                       itemCount: _searchResults.length,
-                      separatorBuilder: (_, __) => Divider(height: 1, color: Colors.grey.shade200),
+                      separatorBuilder: (_, _) => Divider(height: 1, color: Colors.grey.shade200),
                       itemBuilder: (context, index) {
                         final result = _searchResults[index];
                         return ListTile(

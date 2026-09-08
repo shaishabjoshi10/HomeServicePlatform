@@ -1,8 +1,10 @@
 import logging
+import os
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.config import settings
 from app.database import Base, engine
@@ -23,6 +25,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serves uploaded verification documents (e.g. citizenship photos) at
+# /uploads/... . For production, swap local disk + this mount for cloud
+# storage (S3-compatible) and store full URLs instead.
+os.makedirs(settings.upload_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
 
 
 @app.exception_handler(Exception)

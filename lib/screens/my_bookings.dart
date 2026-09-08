@@ -154,7 +154,7 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
         child: ListView.separated(
           padding: const EdgeInsets.all(20),
           itemCount: _bookings.length,
-          separatorBuilder: (_, __) => const SizedBox(height: 12),
+          separatorBuilder: (_, _) => const SizedBox(height: 12),
           itemBuilder: (context, index) {
             final b = _bookings[index];
             return Container(
@@ -175,7 +175,7 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color: _statusColor(b.status).withOpacity(0.1),
+                          color: _statusColor(b.status).withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Text(

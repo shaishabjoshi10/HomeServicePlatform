@@ -192,7 +192,7 @@ class _RoleCard extends StatelessWidget {
       color: Colors.white,
       borderRadius: BorderRadius.circular(20),
       elevation: 2,
-      shadowColor: Colors.black.withOpacity(0.08),
+      shadowColor: Colors.black.withValues(alpha: 0.08),
       child: InkWell(
         borderRadius: BorderRadius.circular(20),
         onTap: onTap,

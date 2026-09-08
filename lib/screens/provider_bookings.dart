@@ -134,7 +134,7 @@ class _ProviderBookingsPageState extends State<ProviderBookingsPage> {
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
               scrollDirection: Axis.horizontal,
               itemCount: _filters.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
               itemBuilder: (context, index) {
                 final filter = _filters[index];
                 final isSelected = filter == _filter;
@@ -186,7 +186,7 @@ class _ProviderBookingsPageState extends State<ProviderBookingsPage> {
                             child: ListView.separated(
                               padding: const EdgeInsets.all(20),
                               itemCount: filtered.length,
-                              separatorBuilder: (_, __) => const SizedBox(height: 12),
+                              separatorBuilder: (_, _) => const SizedBox(height: 12),
                               itemBuilder: (context, index) {
                                 final b = filtered[index];
                                 return InkWell(
@@ -216,7 +216,7 @@ class _ProviderBookingsPageState extends State<ProviderBookingsPage> {
                                             Container(
                                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                               decoration: BoxDecoration(
-                                                color: _statusColor(b.status).withOpacity(0.1),
+                                                color: _statusColor(b.status).withValues(alpha: 0.1),
                                                 borderRadius: BorderRadius.circular(20),
                                               ),
                                               child: Text(

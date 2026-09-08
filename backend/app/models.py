@@ -24,6 +24,11 @@ class UserRole(str, enum.Enum):
     provider = "provider"
 
 
+class MaritalStatus(str, enum.Enum):
+    single = "single"
+    married = "married"
+
+
 class VerificationStatus(str, enum.Enum):
     pending = "pending"
     verified = "verified"
@@ -92,8 +97,29 @@ class ProviderProfile(Base):
     )
     name = Column(String(255), nullable=False)
     service_category = Column(String(100), nullable=True, index=True)
-    experience = Column(Integer, nullable=True)  # years of experience
-    address = Column(String(500), nullable=True)
+    experience = Column(String(50), nullable=True)  # a range label, e.g. "1-3 years"
+    bio = Column(Text, nullable=True)
+
+    # Personal info, filled in via the "Complete your profile" flow.
+    marital_status = Column(Enum(MaritalStatus, name="marital_status"), nullable=True)
+    permanent_address = Column(String(500), nullable=True)
+    current_address = Column(String(500), nullable=True)
+    city = Column(String(100), nullable=True)
+    municipality = Column(String(150), nullable=True)
+    tole = Column(String(150), nullable=True)
+    ward_no = Column(Integer, nullable=True)
+    citizenship_number = Column(String(50), nullable=True)
+
+    # Verification documents — store the served URL path (e.g.
+    # "/uploads/citizenship/<file>"), not a raw filesystem path.
+    citizenship_front_url = Column(String(500), nullable=True)
+    citizenship_back_url = Column(String(500), nullable=True)
+
+    # A contact email/phone for the profile itself — separate from the
+    # login identifier on User, since that may be a phone number.
+    alternative_email = Column(String(255), nullable=True)
+    alternative_phone = Column(String(20), nullable=True)
+
     verification_status = Column(
         Enum(VerificationStatus, name="verification_status"),
         nullable=False,
@@ -109,6 +135,7 @@ class ProviderProfile(Base):
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
 
 class Booking(Base):
     __tablename__ = "bookings"

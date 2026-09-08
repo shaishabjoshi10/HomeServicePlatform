@@ -8,6 +8,12 @@ class Settings(BaseSettings):
     jwt_expires_minutes: int = 10080  # 7 days
     allowed_origins: str = "*"
 
+    # Local disk storage for provider verification documents (citizenship
+    # photos). For a production deployment, swap this for cloud storage
+    # (S3-compatible) and store URLs instead of local paths.
+    upload_dir: str = "uploads"
+    max_upload_mb: int = 5
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property

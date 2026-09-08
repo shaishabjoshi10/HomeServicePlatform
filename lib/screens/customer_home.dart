@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../main.dart';
-import '../models/customer_profile.dart';
 import '../models/provider_profile.dart';
 import '../services/booking_service.dart';
 import '../services/profile_service.dart';
@@ -191,7 +190,7 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
       scrollDirection: Axis.horizontal,
       itemCount: _professionals.length,
-      separatorBuilder: (_, __) => const SizedBox(width: 12),
+      separatorBuilder: (_, _) => const SizedBox(width: 12),
       itemBuilder: (context, index) {
         final p = _professionals[index];
         return InkWell(
@@ -1161,7 +1160,7 @@ class _CategoryResultsPage extends StatelessWidget {
           : ListView.separated(
         padding: const EdgeInsets.all(20),
         itemCount: providers.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 12),
+        separatorBuilder: (_, _) => const SizedBox(height: 12),
         itemBuilder: (context, index) {
           final provider = providers[index];
           return _ProviderListTile(
@@ -1218,7 +1217,7 @@ class _AllServicesPageState extends State<_AllServicesPage> {
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
               scrollDirection: Axis.horizontal,
               itemCount: _filters.length,
-              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
               itemBuilder: (context, index) {
                 final filter = _filters[index];
                 final isSelected = filter == _selectedFilter;
@@ -1253,7 +1252,7 @@ class _AllServicesPageState extends State<_AllServicesPage> {
                 : ListView.separated(
               padding: const EdgeInsets.all(20),
               itemCount: filtered.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 12),
+              separatorBuilder: (_, _) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
                 final provider = filtered[index];
                 return _ProviderListTile(
@@ -1297,7 +1296,7 @@ class _AllProfessionalsPage extends StatelessWidget {
           : ListView.separated(
         padding: const EdgeInsets.all(20),
         itemCount: sorted.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 12),
+        separatorBuilder: (_, _) => const SizedBox(height: 12),
         itemBuilder: (context, index) {
           final p = sorted[index];
           return Material(

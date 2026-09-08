@@ -35,8 +35,8 @@ class BookingService {
     final body = jsonEncode({
       'provider_id': providerId,
       'address': address,
-      if (latitude != null) 'latitude': latitude,
-      if (longitude != null) 'longitude': longitude,
+      'latitude': ?latitude,
+      'longitude': ?longitude,
       if (serviceCategory != null && serviceCategory.isNotEmpty) 'service_category': serviceCategory,
       if (notes != null && notes.isNotEmpty) 'notes': notes,
       if (preferredDate != null) 'preferred_date': preferredDate.toIso8601String(),

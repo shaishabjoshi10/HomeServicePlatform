@@ -5,6 +5,7 @@ import '../models/provider_profile.dart';
 import '../services/booking_service.dart';
 import '../services/provider_service.dart';
 import 'booking_detail_sheet.dart';
+import 'complete_profile.dart';
 import 'provider_bookings.dart';
 import 'role_selection.dart';
 
@@ -206,9 +207,21 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                   _ProfileMenuTile(
                     icon: Icons.person_outline_rounded,
                     label: 'Edit Profile',
-                    onTap: () {
+                    onTap: () async {
                       Navigator.pop(context);
-                      // TODO: navigate to edit profile page
+                      if (_profile == null) return;
+                      final updated = await Navigator.push<bool>(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => CompleteProfilePage(
+                            accessToken: widget.accessToken,
+                            currentProfile: _profile!,
+                          ),
+                        ),
+                      );
+                      if (updated == true) {
+                        _loadProfile();
+                      }
                     },
                   ),
                   _ProfileMenuTile(
@@ -450,6 +463,50 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                 ),
               ),
             ),
+
+            // Complete-profile nudge
+            if (!_loadingProfile && _profile != null && !_profile!.isComplete)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: () async {
+                      final updated = await Navigator.push<bool>(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => CompleteProfilePage(
+                            accessToken: widget.accessToken,
+                            currentProfile: _profile!,
+                          ),
+                        ),
+                      );
+                      if (updated == true) _loadProfile();
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.shade50,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.orange.shade200),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline_rounded, color: Colors.orange.shade800),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Text(
+                              'Complete your profile to start getting bookings.',
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                            ),
+                          ),
+                          Icon(Icons.chevron_right_rounded, color: Colors.orange.shade800),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
 
             // Stats banner
             SliverToBoxAdapter(
@@ -714,54 +771,6 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                 ),
               ),
             ),
-
-            // Grow your business banner
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: kLightGreenBg,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Grow Your Business',
-                                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: kDarkText)),
-                            const SizedBox(height: 4),
-                            Text('Complete your profile and get more bookings.',
-                                style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
-                            const SizedBox(height: 14),
-                            FilledButton(
-                              onPressed: () => _showProfileMenu(context),
-                              style: FilledButton.styleFrom(
-                                backgroundColor: kPrimaryGreen,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                              ),
-                              child: const Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text('Complete Profile'),
-                                  SizedBox(width: 6),
-                                  Icon(Icons.arrow_forward_rounded, size: 16),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Icon(Icons.assignment_turned_in_outlined, color: kAccentGreen, size: 56),
-                    ],
-                  ),
-                ),
-              ),
-            ),
           ],
         ),
       ),
@@ -830,7 +839,7 @@ class _StatItem extends StatelessWidget {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
+              color: Colors.white.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon, color: Colors.white, size: 18),
@@ -840,7 +849,7 @@ class _StatItem extends StatelessWidget {
           const SizedBox(height: 2),
           Text(label,
               textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 10)),
+              style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 10)),
         ],
       ),
     );
