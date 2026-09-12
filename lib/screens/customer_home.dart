@@ -322,6 +322,8 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
     DateTime? preferredDate;
     TimeOfDay? preferredTime;
     PickedLocation? pickedLocation = _defaultLocation;
+    bool isSubmitting = false; // guards against double-tap firing two bookings
+    bool isSubmitted = false; // true once the request succeeds; shows the brief confirmation
 
     await showModalBottomSheet(
       context: context,
@@ -331,6 +333,28 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
       builder: (sheetContext) {
         return StatefulBuilder(
           builder: (context, setSheetState) {
+            if (isSubmitted) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 64,
+                      height: 64,
+                      decoration: const BoxDecoration(color: kLightGreenBg, shape: BoxShape.circle),
+                      child: const Icon(Icons.check_rounded, color: kPrimaryGreen, size: 36),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Booking request sent!',
+                        style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: kDarkText)),
+                    const SizedBox(height: 6),
+                    Text('Taking you to your bookings…',
+                        style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+                  ],
+                ),
+              );
+            }
             return Padding(
               padding: EdgeInsets.only(
                 left: 20,
@@ -509,7 +533,9 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                             padding: const EdgeInsets.symmetric(vertical: 16),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                           ),
-                          onPressed: () async {
+                          onPressed: isSubmitting
+                              ? null
+                              : () async {
                             if (!formKey.currentState!.validate()) return;
                             if (pickedLocation == null) {
                               ScaffoldMessenger.of(context).showSnackBar(
@@ -532,6 +558,7 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                               preferredTime?.hour ?? 9,
                               preferredTime?.minute ?? 0,
                             );
+                            setSheetState(() => isSubmitting = true);
                             try {
                               await BookingService.createBooking(
                                 accessToken: widget.accessToken,
@@ -543,42 +570,54 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                                 notes: notesController.text.trim().isEmpty ? null : notesController.text.trim(),
                                 preferredDate: combinedDateTime,
                               );
+                              if (!sheetContext.mounted) return;
+                              // Show the brief confirmation in place of the form first...
+                              setSheetState(() => isSubmitted = true);
+                              await Future.delayed(const Duration(milliseconds: 1100));
+                              // ...then close the sheet and hand off to a fresh Booking List,
+                              // which reloads from the server on its own, so it always shows
+                              // the new request with its current status.
+                              if (!sheetContext.mounted) return;
                               Navigator.pop(sheetContext);
-                              if (pageContext.mounted) {
-                                ScaffoldMessenger.of(pageContext).showSnackBar(
-                                  SnackBar(
-                                    content: const Text('Booking request sent!'),
-                                    backgroundColor: kPrimaryGreen,
-                                    behavior: SnackBarBehavior.floating,
-                                    action: SnackBarAction(
-                                      label: 'View',
-                                      textColor: Colors.white,
-                                      onPressed: () {
-                                        if (!pageContext.mounted) return;
-                                        Navigator.push(
-                                          pageContext,
-                                          MaterialPageRoute(
-                                            builder: (_) => MyBookingsPage(accessToken: widget.accessToken),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                  ),
-                                );
-                              }
+                              if (!pageContext.mounted) return;
+                              Navigator.push(
+                                pageContext,
+                                MaterialPageRoute(
+                                  builder: (_) => MyBookingsPage(accessToken: widget.accessToken),
+                                ),
+                              );
                             } on BookingServiceException catch (e) {
-                              if (context.mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text(e.message),
-                                    backgroundColor: Colors.red.shade600,
-                                    behavior: SnackBarBehavior.floating,
-                                  ),
-                                );
-                              }
+                              if (!context.mounted) return;
+                              setSheetState(() => isSubmitting = false);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(e.message),
+                                  backgroundColor: Colors.red.shade600,
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
+                            } catch (_) {
+                              // Any other failure (timeout, bad response, etc.) still has to
+                              // re-enable the button — otherwise it's stuck disabled forever
+                              // with no way to retry.
+                              if (!context.mounted) return;
+                              setSheetState(() => isSubmitting = false);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: const Text('Something went wrong. Please try again.'),
+                                  backgroundColor: Colors.red.shade600,
+                                  behavior: SnackBarBehavior.floating,
+                                ),
+                              );
                             }
                           },
-                          child: const Text('Send Booking Request',
+                          child: isSubmitting
+                              ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2.4, color: Colors.white),
+                          )
+                              : const Text('Send Booking Request',
                               style: TextStyle(fontWeight: FontWeight.w600)),
                         ),
                       ),
