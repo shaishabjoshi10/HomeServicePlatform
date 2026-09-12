@@ -3,7 +3,9 @@ import uuid
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
+    Date,
     DateTime,
     Enum,
     Float,
@@ -16,17 +18,13 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID
 
+from app.constants import DEFAULT_CITY
 from app.database import Base
 
 
 class UserRole(str, enum.Enum):
     customer = "customer"
     provider = "provider"
-
-
-class MaritalStatus(str, enum.Enum):
-    single = "single"
-    married = "married"
 
 
 class VerificationStatus(str, enum.Enum):
@@ -100,14 +98,11 @@ class ProviderProfile(Base):
     experience = Column(String(50), nullable=True)  # a range label, e.g. "1-3 years"
     bio = Column(Text, nullable=True)
 
-    # Personal info, filled in via the "Complete your profile" flow.
-    marital_status = Column(Enum(MaritalStatus, name="marital_status"), nullable=True)
-    permanent_address = Column(String(500), nullable=True)
-    current_address = Column(String(500), nullable=True)
-    city = Column(String(100), nullable=True)
-    municipality = Column(String(150), nullable=True)
-    tole = Column(String(150), nullable=True)
-    ward_no = Column(Integer, nullable=True)
+    # Personal info, filled in via the "Complete your profile" flow. The
+    # app currently only serves Kathmandu, so city is a fixed default
+    # rather than a field the provider picks — see app.constants.DEFAULT_CITY.
+    date_of_birth = Column(Date, nullable=True)
+    city = Column(String(100), nullable=False, default=DEFAULT_CITY, server_default=DEFAULT_CITY)
     citizenship_number = Column(String(50), nullable=True)
 
     # Verification documents — store the served URL path (e.g.
@@ -161,3 +156,38 @@ class Booking(Base):
     )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class Rating(Base):
+    """
+    A customer's rating of a provider for one completed booking. Exactly
+    one rating per booking — enforced both at the DB level (unique
+    constraint on booking_id, so it holds even under concurrent requests)
+    and by the route (which also checks the booking is 'completed' and
+    belongs to the requesting customer before allowing it).
+
+    customer_id/provider_id reference users.id, mirroring Booking, so
+    they can be queried the same way. provider_id is denormalized from
+    the booking here purely so the average can be aggregated with a
+    single query filtered on Rating alone.
+    """
+
+    __tablename__ = "ratings"
+    __table_args__ = (
+        UniqueConstraint("booking_id", name="uq_ratings_booking_id"),
+        CheckConstraint("stars >= 1 AND stars <= 5", name="ck_ratings_stars_range"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    booking_id = Column(
+        UUID(as_uuid=True), ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    customer_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    stars = Column(Integer, nullable=False)
+    comment = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -20,6 +20,15 @@ class _ProviderBookingsPageState extends State<ProviderBookingsPage> {
   String? _error;
   String _filter = 'All';
 
+  // Bookings with an accept/decline/complete request currently in flight —
+  // used to disable those actions so a double-tap (or a slow connection)
+  // can't fire a second request for a booking whose status the first
+  // request already changed. Without this, the second request lands after
+  // the first has succeeded, gets correctly rejected by the backend
+  // (status no longer matches the expected transition), and surfaces a
+  // confusing error even though the original action worked.
+  final Set<String> _updatingIds = {};
+
   static const _filters = ['All', 'Pending', 'Accepted', 'Completed', 'Declined'];
 
   @override
@@ -56,18 +65,22 @@ class _ProviderBookingsPageState extends State<ProviderBookingsPage> {
   }
 
   Future<void> _respond(Booking booking, String status) async {
+    if (_updatingIds.contains(booking.id)) return;
+    setState(() => _updatingIds.add(booking.id));
     try {
       await BookingService.updateStatus(
         accessToken: widget.accessToken,
         bookingId: booking.id,
         status: status,
       );
-      _load();
+      await _load();
     } on BookingServiceException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.message), backgroundColor: Colors.red.shade600),
       );
+    } finally {
+      if (mounted) setState(() => _updatingIds.remove(booking.id));
     }
   }
 
@@ -189,74 +202,80 @@ class _ProviderBookingsPageState extends State<ProviderBookingsPage> {
                               separatorBuilder: (_, _) => const SizedBox(height: 12),
                               itemBuilder: (context, index) {
                                 final b = filtered[index];
+                                final isUpdating = _updatingIds.contains(b.id);
                                 return InkWell(
                                   borderRadius: BorderRadius.circular(16),
-                                  onTap: () => showBookingDetailSheet(
-                                    context,
-                                    booking: b,
-                                    onAccept: b.status == 'pending' ? () => _respond(b, 'accepted') : null,
-                                    onDecline: b.status == 'pending' ? () => _respond(b, 'rejected') : null,
-                                    onComplete: b.status == 'accepted' ? () => _respond(b, 'completed') : null,
-                                  ),
-                                  child: Container(
-                                    padding: const EdgeInsets.all(14),
-                                    decoration: BoxDecoration(
-                                      border: Border.all(color: Colors.grey.shade200),
-                                      borderRadius: BorderRadius.circular(16),
-                                    ),
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          children: [
-                                            Expanded(
-                                              child: Text(b.customerName,
-                                                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                                            ),
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                              decoration: BoxDecoration(
-                                                color: _statusColor(b.status).withValues(alpha: 0.1),
-                                                borderRadius: BorderRadius.circular(20),
-                                              ),
-                                              child: Text(
-                                                _statusLabel(b.status),
-                                                style: TextStyle(
-                                                    fontSize: 11, color: _statusColor(b.status), fontWeight: FontWeight.w600),
-                                              ),
-                                            ),
-                                          ],
+                                  onTap: isUpdating
+                                      ? null
+                                      : () => showBookingDetailSheet(
+                                          context,
+                                          booking: b,
+                                          onAccept: b.status == 'pending' ? () => _respond(b, 'accepted') : null,
+                                          onDecline: b.status == 'pending' ? () => _respond(b, 'rejected') : null,
+                                          onComplete: b.status == 'accepted' ? () => _respond(b, 'completed') : null,
                                         ),
-                                        if (b.serviceCategory != null) ...[
-                                          const SizedBox(height: 2),
-                                          Text(b.serviceCategory!, style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
-                                        ],
-                                        const SizedBox(height: 8),
-                                        Row(
-                                          crossAxisAlignment: CrossAxisAlignment.start,
-                                          children: [
-                                            Icon(Icons.location_on_outlined, size: 14, color: Colors.grey.shade600),
-                                            const SizedBox(width: 4),
-                                            Expanded(
-                                              child: Text(b.address, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                                            ),
-                                          ],
-                                        ),
-                                        if (b.preferredDate != null) ...[
-                                          const SizedBox(height: 4),
+                                  child: Opacity(
+                                    opacity: isUpdating ? 0.5 : 1,
+                                    child: Container(
+                                      padding: const EdgeInsets.all(14),
+                                      decoration: BoxDecoration(
+                                        border: Border.all(color: Colors.grey.shade200),
+                                        borderRadius: BorderRadius.circular(16),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
                                           Row(
                                             children: [
-                                              Icon(Icons.calendar_today_outlined, size: 13, color: Colors.grey.shade600),
-                                              const SizedBox(width: 4),
-                                              Text(
-                                                '${b.preferredDate!.year}-${b.preferredDate!.month.toString().padLeft(2, '0')}-${b.preferredDate!.day.toString().padLeft(2, '0')}'
-                                                ' · ${TimeOfDay.fromDateTime(b.preferredDate!).format(context)}',
-                                                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                              Expanded(
+                                                child: Text(b.customerName,
+                                                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                                              ),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                                decoration: BoxDecoration(
+                                                  color: _statusColor(b.status).withValues(alpha: 0.1),
+                                                  borderRadius: BorderRadius.circular(20),
+                                                ),
+                                                child: Text(
+                                                  _statusLabel(b.status),
+                                                  style: TextStyle(
+                                                      fontSize: 11, color: _statusColor(b.status), fontWeight: FontWeight.w600),
+                                                ),
                                               ),
                                             ],
                                           ),
+                                          if (b.serviceCategory != null) ...[
+                                            const SizedBox(height: 2),
+                                            Text(b.serviceCategory!, style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+                                          ],
+                                          const SizedBox(height: 8),
+                                          Row(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Icon(Icons.location_on_outlined, size: 14, color: Colors.grey.shade600),
+                                              const SizedBox(width: 4),
+                                              Expanded(
+                                                child: Text(b.address, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                                              ),
+                                            ],
+                                          ),
+                                          if (b.preferredDate != null) ...[
+                                            const SizedBox(height: 4),
+                                            Row(
+                                              children: [
+                                                Icon(Icons.calendar_today_outlined, size: 13, color: Colors.grey.shade600),
+                                                const SizedBox(width: 4),
+                                                Text(
+                                                  '${b.preferredDate!.year}-${b.preferredDate!.month.toString().padLeft(2, '0')}-${b.preferredDate!.day.toString().padLeft(2, '0')}'
+                                                  ' · ${TimeOfDay.fromDateTime(b.preferredDate!).format(context)}',
+                                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
                                         ],
-                                      ],
+                                      ),
                                     ),
                                   ),
                                 );

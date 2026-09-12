@@ -37,6 +37,11 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
   bool _loadingBookings = true;
   String? _bookingsError;
 
+  // See _respondToBooking — guards against a double-tap firing a second
+  // status-change request for a booking whose first request hasn't
+  // finished yet.
+  final Set<String> _updatingBookingIds = {};
+
   @override
   void initState() {
     super.initState();
@@ -75,18 +80,27 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
   }
 
   Future<void> _respondToBooking(Booking booking, String status) async {
+    // Without this guard, a double-tap (or a slow connection) can fire a
+    // second status-change request after the first has already succeeded;
+    // the backend correctly rejects that redundant transition, which would
+    // otherwise surface as a confusing error even though the original
+    // action worked.
+    if (_updatingBookingIds.contains(booking.id)) return;
+    setState(() => _updatingBookingIds.add(booking.id));
     try {
       await BookingService.updateStatus(
         accessToken: widget.accessToken,
         bookingId: booking.id,
         status: status,
       );
-      _loadBookings();
+      await _loadBookings();
     } on BookingServiceException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.message), backgroundColor: Colors.red.shade600),
       );
+    } finally {
+      if (mounted) setState(() => _updatingBookingIds.remove(booking.id));
     }
   }
 
@@ -389,8 +403,6 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Good morning, 👋', style: TextStyle(fontSize: 15)),
-                          const SizedBox(height: 4),
                           Text('Ready to serve today?',
                               style: TextStyle(fontSize: 22, fontWeight: FontWeight.w700, color: kDarkText)),
                           const SizedBox(height: 4),
@@ -567,65 +579,77 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                   delegate: SliverChildBuilderDelegate(
                         (context, index) {
                       final b = _pendingBookings[index];
+                      final isUpdating = _updatingBookingIds.contains(b.id);
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 12),
                         child: InkWell(
                           borderRadius: BorderRadius.circular(16),
-                          onTap: () => showBookingDetailSheet(
-                            context,
-                            booking: b,
-                            onAccept: () => _respondToBooking(b, 'accepted'),
-                            onDecline: () => _respondToBooking(b, 'rejected'),
-                          ),
-                          child: Container(
-                            padding: const EdgeInsets.all(14),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.grey.shade200),
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(b.customerName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                                if (b.serviceCategory != null) ...[
-                                  const SizedBox(height: 2),
-                                  Text(b.serviceCategory!, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                                ],
-                                const SizedBox(height: 6),
-                                Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Icon(Icons.location_on_outlined, size: 13, color: Colors.grey.shade600),
-                                    const SizedBox(width: 4),
-                                    Expanded(
-                                      child: Text(b.address, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                                    ),
-                                  ],
+                          onTap: isUpdating
+                              ? null
+                              : () => showBookingDetailSheet(
+                                  context,
+                                  booking: b,
+                                  onAccept: () => _respondToBooking(b, 'accepted'),
+                                  onDecline: () => _respondToBooking(b, 'rejected'),
                                 ),
-                                const SizedBox(height: 12),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: OutlinedButton(
-                                        onPressed: () => _respondToBooking(b, 'rejected'),
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: Colors.red.shade600,
-                                          side: BorderSide(color: Colors.red.shade200),
+                          child: Opacity(
+                            opacity: isUpdating ? 0.5 : 1,
+                            child: Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.grey.shade200),
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(b.customerName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                                  if (b.serviceCategory != null) ...[
+                                    const SizedBox(height: 2),
+                                    Text(b.serviceCategory!, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                                  ],
+                                  const SizedBox(height: 6),
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Icon(Icons.location_on_outlined, size: 13, color: Colors.grey.shade600),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(b.address, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: OutlinedButton(
+                                          onPressed: isUpdating ? null : () => _respondToBooking(b, 'rejected'),
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: Colors.red.shade600,
+                                            side: BorderSide(color: Colors.red.shade200),
+                                          ),
+                                          child: const Text('Decline'),
                                         ),
-                                        child: const Text('Decline'),
                                       ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: FilledButton(
-                                        onPressed: () => _respondToBooking(b, 'accepted'),
-                                        style: FilledButton.styleFrom(backgroundColor: kPrimaryGreen),
-                                        child: const Text('Accept'),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: FilledButton(
+                                          onPressed: isUpdating ? null : () => _respondToBooking(b, 'accepted'),
+                                          style: FilledButton.styleFrom(backgroundColor: kPrimaryGreen),
+                                          child: isUpdating
+                                              ? const SizedBox(
+                                                  width: 16,
+                                                  height: 16,
+                                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                                )
+                                              : const Text('Accept'),
+                                        ),
                                       ),
-                                    ),
-                                  ],
-                                ),
-                              ],
+                                    ],
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),

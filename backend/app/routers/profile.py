@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.constants import CITIES, CITY_MUNICIPALITIES, EXPERIENCE_RANGES, MARITAL_STATUS_OPTIONS, SERVICE_CATEGORIES
+from app.constants import DEFAULT_CITY, EXPERIENCE_RANGES, SERVICE_CATEGORIES
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import CustomerProfile, ProviderProfile, User, UserRole, VerificationStatus
@@ -13,25 +13,32 @@ from app.schemas import CustomerProfileOut, ProfileOptionsOut, ProfileUpdateRequ
 
 router = APIRouter(prefix="/api/profile", tags=["profile"])
 
-_ALLOWED_IMAGE_TYPES = {"image/jpeg", "image/png", "image/webp"}
+# Accepted formats: JPG, JPEG, PNG. "image/jpg" is not an official MIME type,
+# but some browsers/clients send it for .jpg files, so it's accepted too.
+_ALLOWED_IMAGE_CONTENT_TYPES = {"image/jpeg", "image/jpg", "image/png"}
+_ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+_UPLOAD_ERROR_DETAIL = "Allowed formats: JPG, JPEG, PNG. Maximum size: 5 MB per file."
 
 
 def _save_citizenship_image(user_id: uuid_module.UUID, side: str, upload: UploadFile) -> str:
-    if upload.content_type not in _ALLOWED_IMAGE_TYPES:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only JPEG, PNG, or WEBP images are allowed.",
-        )
+    ext = os.path.splitext(upload.filename or "")[1].lower()
+    content_type = (upload.content_type or "").lower()
+
+    # Some clients (older browsers, some HTTP libraries) either mislabel the
+    # multipart Content-Type (e.g. "image/jpg" instead of "image/jpeg") or
+    # don't set one at all (falling back to "application/octet-stream").
+    # That was causing legitimate .jpg uploads to be rejected outright, so a
+    # valid file extension is also accepted as proof of format even when the
+    # content type doesn't match.
+    if content_type not in _ALLOWED_IMAGE_CONTENT_TYPES and ext not in _ALLOWED_IMAGE_EXTENSIONS:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_UPLOAD_ERROR_DETAIL)
 
     contents = upload.file.read()
     max_bytes = settings.max_upload_mb * 1024 * 1024
     if len(contents) > max_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File too large — max {settings.max_upload_mb}MB.",
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_UPLOAD_ERROR_DETAIL)
 
-    ext = os.path.splitext(upload.filename or "")[1].lower() or ".jpg"
+    ext = ext or ".jpg"
     filename = f"{user_id}_{side}_{uuid_module.uuid4().hex[:8]}{ext}"
     directory = os.path.join(settings.upload_dir, "citizenship")
     os.makedirs(directory, exist_ok=True)
@@ -55,10 +62,8 @@ def get_profile_form_options():
     """Dropdown option lists for the provider verification form."""
     return ProfileOptionsOut(
         service_categories=SERVICE_CATEGORIES,
-        cities=CITIES,
-        municipalities_by_city=CITY_MUNICIPALITIES,
         experience_ranges=EXPERIENCE_RANGES,
-        marital_statuses=MARITAL_STATUS_OPTIONS,
+        default_city=DEFAULT_CITY,
     )
 
 
@@ -125,20 +130,8 @@ def update_my_profile(
         profile.bio = payload.bio
     if payload.availability is not None:
         profile.availability = payload.availability
-    if payload.marital_status is not None:
-        profile.marital_status = payload.marital_status
-    if payload.permanent_address is not None:
-        profile.permanent_address = payload.permanent_address
-    if payload.current_address is not None:
-        profile.current_address = payload.current_address
-    if payload.city is not None:
-        profile.city = payload.city
-    if payload.municipality is not None:
-        profile.municipality = payload.municipality
-    if payload.tole is not None:
-        profile.tole = payload.tole
-    if payload.ward_no is not None:
-        profile.ward_no = payload.ward_no
+    if payload.date_of_birth is not None:
+        profile.date_of_birth = payload.date_of_birth
     if payload.citizenship_number is not None:
         profile.citizenship_number = payload.citizenship_number
     if payload.alternative_email is not None:

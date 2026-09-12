@@ -10,42 +10,10 @@ SERVICE_CATEGORIES: list[str] = [
     "Moving & Packing",
 ]
 
-# Kathmandu Valley only, for now — the app's initial service area.
-CITIES: list[str] = [
-    "Kathmandu",
-    "Lalitpur",
-    "Bhaktapur",
-    "Kirtipur",
-]
-
-# Which municipalities show up depends on the selected city.
-CITY_MUNICIPALITIES: dict[str, list[str]] = {
-    "Kathmandu": [
-        "Kathmandu Metropolitan City",
-        "Chandragiri Municipality",
-        "Tokha Municipality",
-        "Budhanilkantha Municipality",
-        "Tarakeshwor Municipality",
-        "Gokarneshwor Municipality",
-        "Kageshwori Manohara Municipality",
-        "Nagarjun Municipality",
-        "Dakshinkali Municipality",
-    ],
-    "Lalitpur": [
-        "Lalitpur Metropolitan City",
-        "Godawari Municipality",
-        "Mahalaxmi Municipality",
-    ],
-    "Bhaktapur": [
-        "Bhaktapur Municipality",
-        "Madhyapur Thimi Municipality",
-        "Suryabinayak Municipality",
-        "Changunarayan Municipality",
-    ],
-    "Kirtipur": [
-        "Kirtipur Municipality",
-    ],
-}
+# Kathmandu Valley only, for now — the app's initial service area. Provider
+# verification no longer collects a free-choice city/municipality/address —
+# every provider is fixed to this single default city.
+DEFAULT_CITY: str = "Kathmandu"
 
 EXPERIENCE_RANGES: list[str] = [
     "Less than 1 year",
@@ -53,9 +21,4 @@ EXPERIENCE_RANGES: list[str] = [
     "3-5 years",
     "5-10 years",
     "10+ years",
-]
-
-MARITAL_STATUS_OPTIONS: list[str] = [
-    "single",
-    "married",
 ]

@@ -1,11 +1,14 @@
 import re
 import uuid
-from datetime import datetime
+from datetime import date, datetime, timezone
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.constants import CITIES, CITY_MUNICIPALITIES, EXPERIENCE_RANGES
-from app.models import BookingStatus, MaritalStatus, UserRole, VerificationStatus
+from app.constants import DEFAULT_CITY, EXPERIENCE_RANGES
+from app.models import BookingStatus, UserRole, VerificationStatus
+
+# A provider must be at least this old — sanity bound for date_of_birth.
+_MIN_PROVIDER_AGE_YEARS = 18
 
 _EMAIL_RE = re.compile(r"^[\w.\-+]+@[\w\-]+\.[a-zA-Z]{2,}$")
 
@@ -83,13 +86,8 @@ class ProviderProfileOut(BaseModel):
     service_category: str | None
     experience: str | None
     bio: str | None
-    marital_status: MaritalStatus | None
-    permanent_address: str | None
-    current_address: str | None
-    city: str | None
-    municipality: str | None
-    tole: str | None
-    ward_no: int | None
+    date_of_birth: date | None
+    city: str
     citizenship_number: str | None
     citizenship_front_url: str | None
     citizenship_back_url: str | None
@@ -109,15 +107,19 @@ class ProviderPublicOut(BaseModel):
     ProviderProfileOut, this deliberately excludes citizenship details,
     alternative contact info, and precise address — those are only for the
     provider themselves (GET /api/profile/me) and for admin verification.
+
+    user_id IS included (unlike the fields above) because it isn't
+    sensitive and the client needs it: booking creation targets a User id
+    (Booking.provider_id -> users.id), not this profile's own id.
     """
 
     id: uuid.UUID
+    user_id: uuid.UUID
     name: str
     service_category: str | None
     experience: str | None
     bio: str | None
-    city: str | None
-    municipality: str | None
+    city: str
     verification_status: VerificationStatus
     availability: bool
     rating: float
@@ -142,14 +144,10 @@ class ProfileUpdateRequest(BaseModel):
     bio: str | None = Field(default=None, max_length=500)
     availability: bool | None = None
 
-    # Personal info — provider only.
-    marital_status: MaritalStatus | None = None
-    permanent_address: str | None = Field(default=None, max_length=500)
-    current_address: str | None = Field(default=None, max_length=500)
-    city: str | None = Field(default=None, max_length=100)
-    municipality: str | None = Field(default=None, max_length=150)
-    tole: str | None = Field(default=None, max_length=150)
-    ward_no: int | None = Field(default=None, ge=1, le=99)
+    # Personal info — provider only. City is not settable here: the app
+    # currently only serves DEFAULT_CITY (see app.constants), so it's
+    # fixed server-side rather than accepted from the client.
+    date_of_birth: date | None = None
     citizenship_number: str | None = Field(default=None, max_length=50)
 
     # Alternative contact details — provider only.
@@ -165,30 +163,18 @@ class ProfileUpdateRequest(BaseModel):
             raise ValueError(f"Experience must be one of: {', '.join(EXPERIENCE_RANGES)}")
         return v
 
-    @field_validator("city")
+    @field_validator("date_of_birth")
     @classmethod
-    def validate_city(cls, v: str | None) -> str | None:
+    def validate_date_of_birth(cls, v: date | None) -> date | None:
         if v is None:
             return v
-        if v not in CITIES:
-            raise ValueError(f"City must be one of: {', '.join(CITIES)}")
+        today = datetime.now(timezone.utc).date()
+        if v > today:
+            raise ValueError("Date of birth cannot be in the future")
+        age_years = (today - v).days // 365
+        if age_years < _MIN_PROVIDER_AGE_YEARS:
+            raise ValueError(f"Provider must be at least {_MIN_PROVIDER_AGE_YEARS} years old")
         return v
-
-    @model_validator(mode="after")
-    def validate_municipality_belongs_to_city(self):
-        if self.municipality is None:
-            return self
-        # Municipality options depend on the selected city, so we can only
-        # check it once we know which city — either from this same update,
-        # or already saved. If neither is present, skip: profile.py won't
-        # write a municipality without a city having been set at some point.
-        city = self.city
-        if city is None:
-            return self
-        valid = CITY_MUNICIPALITIES.get(city, [])
-        if self.municipality not in valid:
-            raise ValueError(f"Municipality must be one of: {', '.join(valid)} (for {city})")
-        return self
 
     @field_validator("alternative_email")
     @classmethod
@@ -220,10 +206,8 @@ class ProfileOptionsOut(BaseModel):
     """Dropdown option lists for the provider verification form."""
 
     service_categories: list[str]
-    cities: list[str]
-    municipalities_by_city: dict[str, list[str]]
     experience_ranges: list[str]
-    marital_statuses: list[str]
+    default_city: str = DEFAULT_CITY
 
 
 class BookingCreateRequest(BaseModel):
@@ -255,5 +239,29 @@ class BookingOut(BaseModel):
     status: BookingStatus
     created_at: datetime
     updated_at: datetime
+
+    # Present only once the customer has rated this booking. Kept inline
+    # here (rather than a separate "did I rate this?" endpoint) so the
+    # booking list can show/hide the "Rate" button with no extra request.
+    rating_stars: int | None = None
+    rating_comment: str | None = None
+    rated_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class RatingCreateRequest(BaseModel):
+    stars: int = Field(ge=1, le=5)
+    comment: str | None = Field(default=None, max_length=1000)
+
+
+class RatingOut(BaseModel):
+    id: uuid.UUID
+    booking_id: uuid.UUID
+    customer_id: uuid.UUID
+    provider_id: uuid.UUID
+    stars: int
+    comment: str | None
+    created_at: datetime
 
     model_config = {"from_attributes": True}

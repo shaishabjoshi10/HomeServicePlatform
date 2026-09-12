@@ -11,34 +11,21 @@ import 'api_config.dart';
 /// GET /api/profile/form-options so the app and server stay in sync.
 class ProfileFormOptions {
   final List<String> serviceCategories;
-  final List<String> cities;
-  final Map<String, List<String>> municipalitiesByCity;
   final List<String> experienceRanges;
-  final List<String> maritalStatuses;
+  final String defaultCity;
 
   const ProfileFormOptions({
     required this.serviceCategories,
-    required this.cities,
-    required this.municipalitiesByCity,
     required this.experienceRanges,
-    required this.maritalStatuses,
+    required this.defaultCity,
   });
-
-  /// Municipalities for the given city, or an empty list if none/unknown.
-  List<String> municipalitiesFor(String? city) {
-    if (city == null) return const [];
-    return municipalitiesByCity[city] ?? const [];
-  }
 
   factory ProfileFormOptions.fromJson(Map<String, dynamic> json) {
     List<String> asList(dynamic v) => (v as List<dynamic>).map((e) => e.toString()).toList();
-    final rawMap = json['municipalities_by_city'] as Map<String, dynamic>;
     return ProfileFormOptions(
       serviceCategories: asList(json['service_categories']),
-      cities: asList(json['cities']),
-      municipalitiesByCity: rawMap.map((city, list) => MapEntry(city, asList(list))),
       experienceRanges: asList(json['experience_ranges']),
-      maritalStatuses: asList(json['marital_statuses']),
+      defaultCity: json['default_city'] as String? ?? 'Kathmandu',
     );
   }
 
@@ -56,15 +43,8 @@ class ProfileFormOptions {
       'Gardening',
       'Moving & Packing',
     ],
-    cities: ['Kathmandu', 'Lalitpur', 'Bhaktapur', 'Kirtipur'],
-    municipalitiesByCity: {
-      'Kathmandu': ['Kathmandu Metropolitan City', 'Chandragiri Municipality', 'Tokha Municipality'],
-      'Lalitpur': ['Lalitpur Metropolitan City', 'Godawari Municipality', 'Mahalaxmi Municipality'],
-      'Bhaktapur': ['Bhaktapur Municipality', 'Madhyapur Thimi Municipality', 'Suryabinayak Municipality'],
-      'Kirtipur': ['Kirtipur Municipality'],
-    },
     experienceRanges: ['Less than 1 year', '1-3 years', '3-5 years', '5-10 years', '10+ years'],
-    maritalStatuses: ['single', 'married'],
+    defaultCity: 'Kathmandu',
   );
 }
 
@@ -199,30 +179,22 @@ class ProviderService {
     String? experience,
     String? bio,
     bool? availability,
-    String? maritalStatus,
-    String? permanentAddress,
-    String? currentAddress,
-    String? city,
-    String? municipality,
-    String? tole,
-    int? wardNo,
+    DateTime? dateOfBirth,
     String? citizenshipNumber,
     String? alternativeEmail,
     String? alternativePhone,
   }) async {
+    String? dobString(DateTime? d) => d == null
+        ? null
+        : '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
     final body = <String, dynamic>{
       'name': ?name,
       'service_category': ?serviceCategory,
       'experience': ?experience,
       'bio': ?bio,
       'availability': ?availability,
-      'marital_status': ?maritalStatus,
-      'permanent_address': ?permanentAddress,
-      'current_address': ?currentAddress,
-      'city': ?city,
-      'municipality': ?municipality,
-      'tole': ?tole,
-      'ward_no': ?wardNo,
+      'date_of_birth': ?dobString(dateOfBirth),
       'citizenship_number': ?citizenshipNumber,
       'alternative_email': ?alternativeEmail,
       'alternative_phone': ?alternativePhone,

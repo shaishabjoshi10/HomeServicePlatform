@@ -87,6 +87,37 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
     }
   }
 
+  Future<void> _rateBooking(Booking booking) async {
+    final result = await showDialog<_RatingResult>(
+      context: context,
+      builder: (dialogContext) => _RatingDialog(providerName: booking.providerName),
+    );
+
+    if (result == null) return;
+
+    try {
+      final updated = await BookingService.rateBooking(
+        accessToken: widget.accessToken,
+        bookingId: booking.id,
+        stars: result.stars,
+        comment: result.comment,
+      );
+      if (!mounted) return;
+      setState(() {
+        final index = _bookings.indexWhere((b) => b.id == updated.id);
+        if (index != -1) _bookings[index] = updated;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Thanks for your rating!'), backgroundColor: kPrimaryGreen),
+      );
+    } on BookingServiceException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Colors.red.shade600),
+      );
+    }
+  }
+
   Color _statusColor(String status) {
     switch (status) {
       case 'accepted':
@@ -226,12 +257,125 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
                       ),
                     ),
                   ],
+                  if (b.canBeRated) ...[
+                    const SizedBox(height: 10),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: FilledButton.icon(
+                        onPressed: () => _rateBooking(b),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: kPrimaryGreen,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        ),
+                        icon: const Icon(Icons.star_outline_rounded, size: 18),
+                        label: const Text('Rate Service'),
+                      ),
+                    ),
+                  ] else if (b.ratingStars != null) ...[
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        ...List.generate(
+                          5,
+                              (i) => Icon(
+                            i < b.ratingStars! ? Icons.star_rounded : Icons.star_border_rounded,
+                            size: 16,
+                            color: Colors.amber,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text('You rated this ${b.ratingStars}/5',
+                            style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                      ],
+                    ),
+                  ],
                 ],
               ),
             );
           },
         ),
       ),
+    );
+  }
+}
+
+class _RatingResult {
+  final int stars;
+  final String? comment;
+  _RatingResult(this.stars, this.comment);
+}
+
+class _RatingDialog extends StatefulWidget {
+  final String providerName;
+  const _RatingDialog({required this.providerName});
+
+  @override
+  State<_RatingDialog> createState() => _RatingDialogState();
+}
+
+class _RatingDialogState extends State<_RatingDialog> {
+  int _stars = 0;
+  final _commentController = TextEditingController();
+
+  @override
+  void dispose() {
+    _commentController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text('Rate ${widget.providerName}'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: List.generate(5, (i) {
+              final filled = i < _stars;
+              return IconButton(
+                onPressed: () => setState(() => _stars = i + 1),
+                icon: Icon(
+                  filled ? Icons.star_rounded : Icons.star_border_rounded,
+                  color: Colors.amber,
+                  size: 32,
+                ),
+              );
+            }),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _commentController,
+            maxLength: 500,
+            maxLines: 3,
+            decoration: const InputDecoration(
+              hintText: 'Add a comment (optional)',
+              border: OutlineInputBorder(),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _stars == 0
+              ? null
+              : () => Navigator.pop(
+            context,
+            _RatingResult(
+              _stars,
+              _commentController.text.trim().isEmpty ? null : _commentController.text.trim(),
+            ),
+          ),
+          style: FilledButton.styleFrom(backgroundColor: kPrimaryGreen),
+          child: const Text('Submit'),
+        ),
+      ],
     );
   }
 }

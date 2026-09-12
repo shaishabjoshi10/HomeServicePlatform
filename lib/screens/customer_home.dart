@@ -278,7 +278,12 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
   }
 
   void _openCategoryResults(String categoryName) {
-    if (categoryName == 'More') return;
+    // "More" isn't a real category — it opens the full, filterable service
+    // list (same page as the "View All" link) instead of a dead tap.
+    if (categoryName == 'More') {
+      _openAllServices();
+      return;
+    }
     final results = _professionals.where((p) => p.serviceCategory == categoryName).toList();
     Navigator.push(
       context,
@@ -545,6 +550,19 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                                     content: const Text('Booking request sent!'),
                                     backgroundColor: kPrimaryGreen,
                                     behavior: SnackBarBehavior.floating,
+                                    action: SnackBarAction(
+                                      label: 'View',
+                                      textColor: Colors.white,
+                                      onPressed: () {
+                                        if (!pageContext.mounted) return;
+                                        Navigator.push(
+                                          pageContext,
+                                          MaterialPageRoute(
+                                            builder: (_) => MyBookingsPage(accessToken: widget.accessToken),
+                                          ),
+                                        );
+                                      },
+                                    ),
                                   ),
                                 );
                               }
@@ -652,7 +670,10 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                     label: 'My Bookings',
                     onTap: () {
                       Navigator.pop(context);
-                      // TODO: navigate to bookings page
+                      Navigator.push(
+                        pageContext,
+                        MaterialPageRoute(builder: (_) => MyBookingsPage(accessToken: widget.accessToken)),
+                      );
                     },
                   ),
                   _ProfileMenuTile(
@@ -824,8 +845,6 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('Hello, 👋', style: TextStyle(fontSize: 15)),
-                            const SizedBox(height: 4),
                             Text(
                               'What service do you need today?',
                               style: TextStyle(
@@ -1051,7 +1070,14 @@ class _CategoryTile extends StatelessWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        // Anchored at the top rather than centered: with center alignment,
+        // a two-line label (e.g. "Appliance Repair") made the whole column
+        // taller and pushed the icon square up relative to tiles with a
+        // one-line label, so icons drifted out of alignment across the
+        // grid. Anchoring at the top plus a fixed-height label area below
+        // keeps every icon at the exact same position regardless of how
+        // long its category name is.
+        mainAxisAlignment: MainAxisAlignment.start,
         children: [
           Container(
             width: 56,
@@ -1063,12 +1089,15 @@ class _CategoryTile extends StatelessWidget {
             child: Icon(category.icon, color: kPrimaryGreen, size: 24),
           ),
           const SizedBox(height: 8),
-          Text(
-            category.name,
-            textAlign: TextAlign.center,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 11),
+          SizedBox(
+            height: 28, // room for exactly two lines at this font size
+            child: Text(
+              category.name,
+              textAlign: TextAlign.center,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11),
+            ),
           ),
         ],
       ),
@@ -1107,9 +1136,19 @@ class _ProviderListTile extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(provider.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                  Text(
+                    provider.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                  ),
                   const SizedBox(height: 2),
-                  Text(provider.displayRole, style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+                  Text(
+                    provider.displayRole,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                  ),
                   const SizedBox(height: 4),
                   Row(
                     children: [
@@ -1323,9 +1362,19 @@ class _AllProfessionalsPage extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(p.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                          Text(
+                            p.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
+                          ),
                           const SizedBox(height: 2),
-                          Text(p.displayRole, style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+                          Text(
+                            p.displayRole,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                          ),
                           const SizedBox(height: 4),
                           Row(
                             children: [

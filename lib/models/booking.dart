@@ -13,6 +13,9 @@ class Booking {
   final String status; // pending | accepted | rejected | completed | cancelled
   final DateTime createdAt;
   final DateTime updatedAt;
+  final int? ratingStars; // 1-5 once the customer has rated this booking, else null
+  final String? ratingComment;
+  final DateTime? ratedAt;
 
   Booking({
     required this.id,
@@ -29,7 +32,14 @@ class Booking {
     this.longitude,
     this.notes,
     this.preferredDate,
+    this.ratingStars,
+    this.ratingComment,
+    this.ratedAt,
   });
+
+  /// True once this booking has been marked completed and the customer
+  /// hasn't rated it yet — i.e. the "Rate" button should show.
+  bool get canBeRated => status == 'completed' && ratingStars == null;
 
   factory Booking.fromJson(Map<String, dynamic> json) {
     return Booking(
@@ -47,6 +57,9 @@ class Booking {
       status: json['status'] as String,
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
+      ratingStars: json['rating_stars'] as int?,
+      ratingComment: json['rating_comment'] as String?,
+      ratedAt: json['rated_at'] != null ? DateTime.parse(json['rated_at'] as String) : null,
     );
   }
 }

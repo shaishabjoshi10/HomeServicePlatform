@@ -82,6 +82,28 @@ class BookingService {
     return Booking.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
 
+  /// Rates a completed booking (1-5 stars, optional comment). The backend
+  /// rejects this if the booking isn't completed, isn't the caller's own,
+  /// or has already been rated — surfaced as a [BookingServiceException].
+  static Future<Booking> rateBooking({
+    required String accessToken,
+    required String bookingId,
+    required int stars,
+    String? comment,
+  }) async {
+    final response = await _send(() => http.post(
+      Uri.parse('$_baseUrl/$bookingId/rating'),
+      headers: _authHeaders(accessToken),
+      body: jsonEncode({
+        'stars': stars,
+        if (comment != null && comment.isNotEmpty) 'comment': comment,
+      }),
+    ));
+
+    _checkStatus(response, expected: 201);
+    return Booking.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
   static Future<http.Response> _send(Future<http.Response> Function() request) async {
     try {
       return await request().timeout(const Duration(seconds: 15));
@@ -99,7 +121,15 @@ class BookingService {
     try {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final detail = data['detail'];
-      if (detail is String) message = detail;
+      if (detail is String) {
+        message = detail;
+      } else if (detail is List && detail.isNotEmpty) {
+        final messages = detail
+            .map((e) => e is Map && e['msg'] is String ? e['msg'] as String : null)
+            .whereType<String>()
+            .toList();
+        if (messages.isNotEmpty) message = messages.join(' ');
+      }
     } catch (_) {
       // keep default message
     }

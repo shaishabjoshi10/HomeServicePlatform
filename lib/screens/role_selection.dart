@@ -53,7 +53,7 @@ class RoleSelectionPage extends StatelessWidget {
               ),
               const SizedBox(height: 48),
               Text(
-                'Welcome!',
+                'Welcome',
                 style: TextStyle(
                   fontSize: 28,
                   fontWeight: FontWeight.w700,

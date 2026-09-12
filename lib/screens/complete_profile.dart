@@ -34,21 +34,15 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
   String? _errorMessage;
   ProfileFormOptions _options = ProfileFormOptions.fallback;
 
-  late final TextEditingController _permanentAddressController;
-  late final TextEditingController _currentAddressController;
-  late final TextEditingController _toleController;
-  late final TextEditingController _wardNoController;
   late final TextEditingController _bioController;
   late final TextEditingController _citizenshipNumberController;
   late final TextEditingController _emailController;
   late final TextEditingController _alternativePhoneController;
+  late final TextEditingController _dateOfBirthController;
 
-  String? _maritalStatus;
-  String? _city;
-  String? _municipality;
+  DateTime? _dateOfBirth;
   String? _serviceCategory;
   String? _experience;
-  bool _sameAsPermanent = false;
 
   final _picker = ImagePicker();
   File? _frontImage;
@@ -63,25 +57,40 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
     super.initState();
     final p = widget.currentProfile;
 
-    _permanentAddressController = TextEditingController(text: p.permanentAddress ?? '');
-    _currentAddressController = TextEditingController(text: p.currentAddress ?? '');
-    _toleController = TextEditingController(text: p.tole ?? '');
-    _wardNoController = TextEditingController(text: p.wardNo?.toString() ?? '');
     _bioController = TextEditingController(text: p.bio ?? '');
     _citizenshipNumberController = TextEditingController(text: p.citizenshipNumber ?? '');
     _emailController = TextEditingController(text: p.alternativeEmail ?? '');
     _alternativePhoneController = TextEditingController(text: p.alternativePhone ?? '');
 
-    _maritalStatus = p.maritalStatus;
-    _city = p.city ?? _defaultCity;
-    _municipality = p.municipality;
+    _dateOfBirth = p.dateOfBirth;
+    _dateOfBirthController = TextEditingController(text: _formatDate(_dateOfBirth));
     _serviceCategory = p.serviceCategory;
     _experience = p.experience;
-    _sameAsPermanent = p.permanentAddress != null && p.permanentAddress == p.currentAddress;
     _existingFrontUrl = p.citizenshipFrontUrl;
     _existingBackUrl = p.citizenshipBackUrl;
 
     _loadFormOptions();
+  }
+
+  String _formatDate(DateTime? d) {
+    if (d == null) return '';
+    return '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _pickDateOfBirth() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _dateOfBirth ?? DateTime(now.year - 18, now.month, now.day),
+      firstDate: DateTime(now.year - 100),
+      lastDate: DateTime(now.year - 18, now.month, now.day),
+      helpText: 'Select date of birth',
+    );
+    if (picked == null) return;
+    setState(() {
+      _dateOfBirth = picked;
+      _dateOfBirthController.text = _formatDate(picked);
+    });
   }
 
   Future<void> _loadFormOptions() async {
@@ -89,54 +98,23 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
     if (!mounted) return;
     setState(() {
       _options = options;
-      // Keep an already-saved city/municipality even if either has since
-      // fallen out of the predefined lists, so the dropdowns don't
-      // silently blank out a value the provider already saved.
-      var cities = _options.cities;
-      var municipalitiesByCity = _options.municipalitiesByCity;
-
-      if (_city != null && !cities.contains(_city)) {
-        cities = [...cities, _city!];
-      }
-      if (_city != null && _municipality != null && !_options.municipalitiesFor(_city).contains(_municipality)) {
-        municipalitiesByCity = {
-          ...municipalitiesByCity,
-          _city!: [...municipalitiesByCity[_city!] ?? const [], _municipality!],
-        };
-      }
-
-      _options = ProfileFormOptions(
-        serviceCategories: _options.serviceCategories,
-        cities: cities,
-        municipalitiesByCity: municipalitiesByCity,
-        experienceRanges: _options.experienceRanges,
-        maritalStatuses: _options.maritalStatuses,
-      );
       _loadingOptions = false;
     });
   }
 
   @override
   void dispose() {
-    _permanentAddressController.dispose();
-    _currentAddressController.dispose();
-    _toleController.dispose();
-    _wardNoController.dispose();
     _bioController.dispose();
     _citizenshipNumberController.dispose();
     _emailController.dispose();
     _alternativePhoneController.dispose();
+    _dateOfBirthController.dispose();
     super.dispose();
   }
 
-  void _onSameAsPermanentChanged(bool? checked) {
-    setState(() {
-      _sameAsPermanent = checked ?? false;
-      if (_sameAsPermanent) {
-        _currentAddressController.text = _permanentAddressController.text;
-      }
-    });
-  }
+
+  static const _allowedImageExtensions = {'.jpg', '.jpeg', '.png'};
+  static const _maxImageBytes = 5 * 1024 * 1024; // 5 MB per file
 
   Future<void> _pickImage({required bool isFront}) async {
     final source = await showModalBottomSheet<ImageSource>(
@@ -163,13 +141,30 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
     final picked = await _picker.pickImage(source: source, imageQuality: 85);
     if (picked == null) return;
 
+    final ext = picked.path.contains('.') ? '.${picked.path.split('.').last.toLowerCase()}' : '';
+    if (!_allowedImageExtensions.contains(ext)) {
+      _showUploadError('Allowed formats: JPG, JPEG, PNG.');
+      return;
+    }
+
+    final file = File(picked.path);
+    if (await file.length() > _maxImageBytes) {
+      _showUploadError('Maximum size: 5 MB per file.');
+      return;
+    }
+
     setState(() {
       if (isFront) {
-        _frontImage = File(picked.path);
+        _frontImage = file;
       } else {
-        _backImage = File(picked.path);
+        _backImage = file;
       }
     });
+  }
+
+  void _showUploadError(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   bool get _hasFrontDocument => _frontImage != null || _existingFrontUrl != null;
@@ -195,13 +190,7 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
     try {
       await ProviderService.updateMyProfile(
         accessToken: widget.accessToken,
-        maritalStatus: _maritalStatus,
-        permanentAddress: _permanentAddressController.text.trim(),
-        currentAddress: _currentAddressController.text.trim(),
-        city: _city,
-        municipality: _municipality,
-        tole: _toleController.text.trim(),
-        wardNo: int.tryParse(_wardNoController.text.trim()),
+        dateOfBirth: _dateOfBirth,
         serviceCategory: _serviceCategory,
         bio: _bioController.text.trim(),
         experience: _experience,
@@ -262,155 +251,20 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
               icon: Icons.person_outline_rounded,
               title: 'Personal Information',
               children: [
-                _label('Marital Status'),
-                DropdownButtonFormField<String>(
-                  initialValue: _maritalStatus,
-                  decoration: _fieldDecoration(hint: 'Select marital status', icon: Icons.people_outline_rounded),
-                  items: _options.maritalStatuses
-                      .map((m) => DropdownMenuItem(value: m, child: Text(_capitalize(m))))
-                      .toList(),
-                  onChanged: (v) => setState(() => _maritalStatus = v),
+                _label('City'),
+                TextFormField(
+                  initialValue: _defaultCity,
+                  enabled: false,
+                  decoration: _fieldDecoration(hint: 'City', icon: Icons.map_outlined),
                 ),
                 const SizedBox(height: 16),
-                _label('Address'),
-                CheckboxListTile(
-                  value: _sameAsPermanent,
-                  onChanged: _onSameAsPermanentChanged,
-                  controlAffinity: ListTileControlAffinity.leading,
-                  contentPadding: EdgeInsets.zero,
-                  activeColor: kPrimaryGreen,
-                  dense: true,
-                  title: const Text('Current address is same as permanent address', style: TextStyle(fontSize: 13)),
-                ),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _label('Permanent Address'),
-                          TextFormField(
-                            controller: _permanentAddressController,
-                            textCapitalization: TextCapitalization.words,
-                            decoration: _fieldDecoration(hint: 'Enter your permanent address', icon: Icons.location_on_outlined),
-                            validator: (v) => (v == null || v.trim().length < 3) ? 'Required' : null,
-                            onChanged: (v) {
-                              if (_sameAsPermanent) _currentAddressController.text = v;
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _label('Current Address'),
-                          TextFormField(
-                            controller: _currentAddressController,
-                            enabled: !_sameAsPermanent,
-                            textCapitalization: TextCapitalization.words,
-                            decoration: _fieldDecoration(hint: 'Enter your current address', icon: Icons.location_on_outlined),
-                            validator: (v) => (v == null || v.trim().length < 3) ? 'Required' : null,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _label('City'),
-                          DropdownButtonFormField<String>(
-                            initialValue: _city,
-                            decoration: _fieldDecoration(hint: 'Select city', icon: Icons.map_outlined),
-                            items: _options.cities
-                                .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                                .toList(),
-                            onChanged: (v) => setState(() {
-                              _city = v;
-                              // Municipality options depend on the city — clear it
-                              // unless it's still valid for the newly picked one.
-                              if (!_options.municipalitiesFor(_city).contains(_municipality)) {
-                                _municipality = null;
-                              }
-                            }),
-                            validator: (v) => v == null ? 'Required' : null,
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _label('Municipality'),
-                          DropdownButtonFormField<String>(
-                            initialValue: _municipality,
-                            isExpanded: true,
-                            decoration: _fieldDecoration(
-                              hint: _city == null ? 'Select a city first' : 'Select municipality',
-                              icon: Icons.location_city_outlined,
-                            ),
-                            items: _options
-                                .municipalitiesFor(_city)
-                                .map((m) => DropdownMenuItem(value: m, child: Text(m, overflow: TextOverflow.ellipsis)))
-                                .toList(),
-                            onChanged: _city == null ? null : (v) => setState(() => _municipality = v),
-                            validator: (v) => v == null ? 'Required' : null,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _label('Tole'),
-                          TextFormField(
-                            controller: _toleController,
-                            textCapitalization: TextCapitalization.words,
-                            decoration: _fieldDecoration(hint: 'Enter your tole', icon: Icons.location_on_outlined),
-                            validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _label('Ward No.'),
-                          TextFormField(
-                            controller: _wardNoController,
-                            keyboardType: TextInputType.number,
-                            decoration: _fieldDecoration(hint: 'Enter ward number', icon: Icons.tag),
-                            validator: (v) {
-                              final n = int.tryParse(v?.trim() ?? '');
-                              if (n == null || n < 1 || n > 99) return 'Invalid';
-                              return null;
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+                _label('Date of Birth'),
+                TextFormField(
+                  controller: _dateOfBirthController,
+                  readOnly: true,
+                  onTap: _pickDateOfBirth,
+                  decoration: _fieldDecoration(hint: 'Select your date of birth', icon: Icons.cake_outlined),
+                  validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
                 ),
               ],
             ),
@@ -470,7 +324,7 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
                     Expanded(
                       child: _DocumentTile(
                         label: 'Citizenship Photo (Front View)',
-                        subLabel: 'JPG, PNG - Max 5MB',
+                        subLabel: 'JPG, JPEG, PNG - Max 5MB',
                         file: _frontImage,
                         existingUrl: _existingFrontUrl != null ? '$apiBaseUrl$_existingFrontUrl' : null,
                         onTap: () => _pickImage(isFront: true),
@@ -484,7 +338,7 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
                     Expanded(
                       child: _DocumentTile(
                         label: 'Citizenship Photo (Back View)',
-                        subLabel: 'JPG, PNG - Max 5MB',
+                        subLabel: 'JPG, JPEG, PNG - Max 5MB',
                         file: _backImage,
                         existingUrl: _existingBackUrl != null ? '$apiBaseUrl$_existingBackUrl' : null,
                         onTap: () => _pickImage(isFront: false),
@@ -507,13 +361,7 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            children: const [
-                              Text('Email ', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: kDarkText)),
-                              Text('*', style: TextStyle(color: Colors.red)),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
+                          _label('Email', required: true),
                           TextFormField(
                             controller: _emailController,
                             keyboardType: TextInputType.emailAddress,
@@ -585,10 +433,32 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
     );
   }
 
-  Widget _label(String text) {
+  /// Fixed-height, single-line label used above form fields. Capped to one
+  /// line (with ellipsis) and given a constant height so that when two of
+  /// these sit side by side in a Row — e.g. "Email" next to "Alternative
+  /// Phone Number" — neither label's text length can push the field below
+  /// it down further than the other, which is what was causing the
+  /// verification form's boxes to drift out of alignment.
+  Widget _label(String text, {bool required = false}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 6),
-      child: Text(text, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: kDarkText)),
+      child: SizedBox(
+        height: 18,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Flexible(
+              child: Text(
+                text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: kDarkText),
+              ),
+            ),
+            if (required) const Text(' *', style: TextStyle(color: Colors.red, fontWeight: FontWeight.w600)),
+          ],
+        ),
+      ),
     );
   }
 
@@ -640,7 +510,6 @@ class _CompleteProfilePageState extends State<CompleteProfilePage> {
     );
   }
 
-  String _capitalize(String s) => s.isEmpty ? s : '${s[0].toUpperCase()}${s.substring(1)}';
 }
 
 /// A numbered section card matching the "1 / 2 / 3 / 4" verification-form
@@ -729,7 +598,12 @@ class _DocumentTile extends StatelessWidget {
             Icon(Icons.image_outlined, size: 16, color: Colors.grey.shade600),
             const SizedBox(width: 6),
             Expanded(
-              child: Text(label, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: kDarkText)),
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: kDarkText),
+              ),
             ),
           ],
         ),
