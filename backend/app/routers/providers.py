@@ -11,9 +11,6 @@ router = APIRouter(prefix="/api/providers", tags=["providers"])
 
 @router.get("/categories", response_model=list[str])
 def list_service_categories():
-    """Predefined categories shown in the signup dropdown. A custom value
-    is still accepted at signup (e.g. via an 'Other' option) — this list
-    is just for suggesting common ones."""
     return SERVICE_CATEGORIES
 
 

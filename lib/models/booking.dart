@@ -2,6 +2,7 @@ class Booking {
   final String id;
   final String customerId;
   final String customerName;
+  final String? customerPhone;
   final String providerId;
   final String providerName;
   final String? serviceCategory;
@@ -10,7 +11,7 @@ class Booking {
   final double? longitude;
   final String? notes;
   final DateTime? preferredDate;
-  final String status; // pending | accepted | rejected | completed | cancelled
+  final String status; // pending | accepted | rejected | on_the_way | arrived | completed | cancelled
   final DateTime createdAt;
   final DateTime updatedAt;
   final int? ratingStars; // 1-5 once the customer has rated this booking, else null
@@ -27,6 +28,7 @@ class Booking {
     required this.status,
     required this.createdAt,
     required this.updatedAt,
+    this.customerPhone,
     this.serviceCategory,
     this.latitude,
     this.longitude,
@@ -46,6 +48,7 @@ class Booking {
       id: json['id'].toString(),
       customerId: json['customer_id'].toString(),
       customerName: json['customer_name'] as String,
+      customerPhone: json['customer_phone'] as String?,
       providerId: json['provider_id'].toString(),
       providerName: json['provider_name'] as String,
       serviceCategory: json['service_category'] as String?,

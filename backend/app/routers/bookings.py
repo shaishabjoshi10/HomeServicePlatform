@@ -21,6 +21,7 @@ router = APIRouter(prefix="/api/bookings", tags=["bookings"])
 def _to_booking_out(
     booking: Booking,
     customer_name: str,
+    customer_phone: str | None,
     provider_name: str,
     rating: Rating | None = None,
 ) -> BookingOut:
@@ -28,6 +29,7 @@ def _to_booking_out(
         id=booking.id,
         customer_id=booking.customer_id,
         customer_name=customer_name,
+        customer_phone=customer_phone,
         provider_id=booking.provider_id,
         provider_name=provider_name,
         service_category=booking.service_category,
@@ -104,7 +106,7 @@ def create_booking(
     db.commit()
     db.refresh(booking)
 
-    return _to_booking_out(booking, current_user.full_name, provider.full_name)
+    return _to_booking_out(booking, current_user.full_name, current_user.phone, provider.full_name)
 
 
 @router.get("/me", response_model=list[BookingOut])
@@ -117,7 +119,7 @@ def list_my_bookings(
     Provider = aliased(User)
 
     query = (
-        db.query(Booking, Customer.full_name, Provider.full_name, Rating)
+        db.query(Booking, Customer.full_name, Customer.phone, Provider.full_name, Rating)
         .join(Customer, Booking.customer_id == Customer.id)
         .join(Provider, Booking.provider_id == Provider.id)
         .outerjoin(Rating, Rating.booking_id == Booking.id)
@@ -134,8 +136,8 @@ def list_my_bookings(
     query = query.order_by(Booking.created_at.desc())
 
     return [
-        _to_booking_out(booking, customer_name, provider_name, rating)
-        for booking, customer_name, provider_name, rating in query.all()
+        _to_booking_out(booking, customer_name, customer_phone, provider_name, rating)
+        for booking, customer_name, customer_phone, provider_name, rating in query.all()
     ]
 
 
@@ -160,7 +162,11 @@ def update_booking_status(
             detail="You don't have permission to update this booking.",
         )
 
-    # Only specific, sane status transitions are allowed, per role.
+    # Only specific, sane status transitions are allowed, per role. The
+    # provider's happy path is a strict sequence — accepted -> on_the_way
+    # -> arrived -> completed — so the customer's status timeline always
+    # advances one visible step at a time instead of jumping straight
+    # from "Accepted" to "Completed".
     allowed = False
     if is_provider:
         if booking.status == BookingStatus.pending and new_status in (
@@ -168,7 +174,11 @@ def update_booking_status(
             BookingStatus.rejected,
         ):
             allowed = True
-        elif booking.status == BookingStatus.accepted and new_status == BookingStatus.completed:
+        elif booking.status == BookingStatus.accepted and new_status == BookingStatus.on_the_way:
+            allowed = True
+        elif booking.status == BookingStatus.on_the_way and new_status == BookingStatus.arrived:
+            allowed = True
+        elif booking.status == BookingStatus.arrived and new_status == BookingStatus.completed:
             allowed = True
     elif is_customer:
         if booking.status == BookingStatus.pending and new_status == BookingStatus.cancelled:
@@ -190,7 +200,7 @@ def update_booking_status(
     # No allowed transition above ever lands on/leaves 'completed', so a
     # rating (which can only be created once a booking is completed)
     # never exists at this point — nothing to fetch here.
-    return _to_booking_out(booking, customer.full_name, provider.full_name)
+    return _to_booking_out(booking, customer.full_name, customer.phone, provider.full_name)
 
 
 @router.post("/{booking_id}/rating", response_model=BookingOut, status_code=status.HTTP_201_CREATED)
@@ -254,4 +264,4 @@ def rate_booking(
     _recompute_provider_rating(db, booking.provider_id)
 
     provider = db.query(User).filter(User.id == booking.provider_id).first()
-    return _to_booking_out(booking, current_user.full_name, provider.full_name, rating)
+    return _to_booking_out(booking, current_user.full_name, current_user.phone, provider.full_name, rating)

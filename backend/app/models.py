@@ -34,11 +34,13 @@ class VerificationStatus(str, enum.Enum):
 
 
 class BookingStatus(str, enum.Enum):
-    pending = "pending"      # created by customer, awaiting provider response
-    accepted = "accepted"    # provider accepted
-    rejected = "rejected"    # provider declined
-    completed = "completed"  # provider marked the job done
-    cancelled = "cancelled"  # customer cancelled (only while still pending)
+    pending = "pending"          # created by customer, awaiting provider response
+    accepted = "accepted"        # provider accepted
+    rejected = "rejected"        # provider declined
+    on_the_way = "on_the_way"    # provider has set out for the job
+    arrived = "arrived"          # provider has reached the address
+    completed = "completed"      # provider marked the job done
+    cancelled = "cancelled"      # customer cancelled (only while still pending)
 
 
 class User(Base):

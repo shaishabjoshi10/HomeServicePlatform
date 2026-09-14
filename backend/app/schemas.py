@@ -228,6 +228,7 @@ class BookingOut(BaseModel):
     id: uuid.UUID
     customer_id: uuid.UUID
     customer_name: str
+    customer_phone: str | None
     provider_id: uuid.UUID
     provider_name: str
     service_category: str | None

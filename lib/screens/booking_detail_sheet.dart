@@ -8,12 +8,14 @@ import '../models/booking.dart';
 /// [onAccept]/[onDecline] for a pending booking, only [onComplete] for an
 /// accepted one. Any callback left null simply hides that button.
 Future<void> showBookingDetailSheet(
-  BuildContext context, {
-  required Booking booking,
-  VoidCallback? onAccept,
-  VoidCallback? onDecline,
-  VoidCallback? onComplete,
-}) {
+    BuildContext context, {
+      required Booking booking,
+      VoidCallback? onAccept,
+      VoidCallback? onDecline,
+      VoidCallback? onStartJourney,
+      VoidCallback? onArrived,
+      VoidCallback? onComplete,
+    }) {
   return showModalBottomSheet(
     context: context,
     backgroundColor: Colors.white,
@@ -51,6 +53,8 @@ Future<void> showBookingDetailSheet(
                 ),
                 const SizedBox(height: 20),
                 _DetailRow(icon: Icons.person_outline_rounded, label: 'Customer', value: booking.customerName),
+                if (booking.customerPhone != null && booking.customerPhone!.isNotEmpty)
+                  _DetailRow(icon: Icons.phone_outlined, label: 'Phone', value: booking.customerPhone!),
                 if (booking.serviceCategory != null)
                   _DetailRow(icon: Icons.build_outlined, label: 'Service', value: booking.serviceCategory!),
                 _DetailRow(icon: Icons.location_on_outlined, label: 'Address', value: booking.address),
@@ -99,6 +103,38 @@ Future<void> showBookingDetailSheet(
                           ),
                         ),
                     ],
+                  ),
+                if (onStartJourney != null)
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () {
+                        Navigator.pop(sheetContext);
+                        onStartJourney();
+                      },
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.blue.shade600,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      icon: const Icon(Icons.directions_car_filled_outlined),
+                      label: const Text("I'm on My Way"),
+                    ),
+                  ),
+                if (onArrived != null)
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () {
+                        Navigator.pop(sheetContext);
+                        onArrived();
+                      },
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Colors.purple.shade600,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      icon: const Icon(Icons.location_on_outlined),
+                      label: const Text("I've Arrived"),
+                    ),
                   ),
                 if (onComplete != null)
                   SizedBox(
@@ -173,8 +209,12 @@ class _StatusBadge extends StatelessWidget {
       case 'rejected':
       case 'cancelled':
         return Colors.red.shade600;
-      case 'completed':
+      case 'on_the_way':
         return Colors.blue.shade600;
+      case 'arrived':
+        return Colors.purple.shade600;
+      case 'completed':
+        return Colors.teal.shade700;
       default:
         return Colors.orange.shade700;
     }
@@ -188,6 +228,10 @@ class _StatusBadge extends StatelessWidget {
         return 'Declined';
       case 'cancelled':
         return 'Cancelled';
+      case 'on_the_way':
+        return 'On the Way';
+      case 'arrived':
+        return 'Arrived';
       case 'completed':
         return 'Completed';
       default:
