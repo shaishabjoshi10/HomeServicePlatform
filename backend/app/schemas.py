@@ -2,7 +2,7 @@ import re
 import uuid
 from datetime import date, datetime, timezone
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
 from app.constants import DEFAULT_CITY, EXPERIENCE_RANGES
 from app.models import BookingStatus, UserRole, VerificationStatus
@@ -211,13 +211,51 @@ class ProfileOptionsOut(BaseModel):
 
 
 class BookingCreateRequest(BaseModel):
+    """
+    Mandatory fields: provider_id, address (+ coordinates), preferred_date,
+    and problem_description. notes is the only optional field — see each
+    field's validator below for what "filled with valid information" means
+    for it (non-blank after stripping whitespace, not just non-null).
+    """
+
     provider_id: uuid.UUID
     service_category: str | None = Field(default=None, max_length=100)
     address: str = Field(min_length=3, max_length=500)
-    latitude: float | None = Field(default=None, ge=-90, le=90)
-    longitude: float | None = Field(default=None, ge=-180, le=180)
+    # Required, not optional: the client always sends these together with
+    # the address (they come from the same map picker), so a booking with
+    # an address but no coordinates means a broken/incomplete request,
+    # not a legitimate one.
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    # Required: the customer must commit to a specific date and time up
+    # front rather than leaving the provider to guess. No default — a
+    # missing value is a 422, not a booking with no schedule.
+    preferred_date: datetime
+    # Required: a booking must say what the problem actually is. min_length
+    # here only rejects the empty string outright; the real "is this
+    # meaningful" check (whitespace-only, too short to be useful) happens
+    # in the validator below, same pattern as `address`.
+    problem_description: str = Field(min_length=1, max_length=1000)
+    # The only optional field — anything extra the customer wants to add
+    # on top of the required problem description.
     notes: str | None = Field(default=None, max_length=1000)
-    preferred_date: datetime | None = None
+
+    @field_validator("address")
+    @classmethod
+    def address_must_not_be_blank(cls, v: str) -> str:
+        # min_length alone would let "   " (whitespace only) through.
+        v = v.strip()
+        if len(v) < 3:
+            raise ValueError("Address is required.")
+        return v
+
+    @field_validator("problem_description")
+    @classmethod
+    def problem_description_must_be_meaningful(cls, v: str) -> str:
+        v = v.strip()
+        if len(v) < 10:
+            raise ValueError("Please describe the problem in at least 10 characters.")
+        return v
 
 
 class BookingStatusUpdateRequest(BaseModel):
@@ -235,6 +273,9 @@ class BookingOut(BaseModel):
     address: str
     latitude: float | None
     longitude: float | None
+    # Optional here (unlike on BookingCreateRequest) purely for backward
+    # compatibility with any booking row that predates this field.
+    problem_description: str | None
     notes: str | None
     preferred_date: datetime | None
     status: BookingStatus

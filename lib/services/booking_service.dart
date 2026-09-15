@@ -22,24 +22,30 @@ class BookingService {
     'Authorization': 'Bearer $accessToken',
   };
 
+  /// address/latitude/longitude, preferredDate, and problemDescription are
+  /// all mandatory — the booking form only calls this once every one of
+  /// them is filled with valid, non-blank information. notes is the only
+  /// field that stays optional.
   static Future<Booking> createBooking({
     required String accessToken,
     required String providerId,
     required String address,
-    double? latitude,
-    double? longitude,
+    required double latitude,
+    required double longitude,
+    required DateTime preferredDate,
+    required String problemDescription,
     String? serviceCategory,
     String? notes,
-    DateTime? preferredDate,
   }) async {
     final body = jsonEncode({
       'provider_id': providerId,
       'address': address,
-      'latitude': ?latitude,
-      'longitude': ?longitude,
+      'latitude': latitude,
+      'longitude': longitude,
+      'preferred_date': preferredDate.toIso8601String(),
+      'problem_description': problemDescription,
       if (serviceCategory != null && serviceCategory.isNotEmpty) 'service_category': serviceCategory,
       if (notes != null && notes.isNotEmpty) 'notes': notes,
-      if (preferredDate != null) 'preferred_date': preferredDate.toIso8601String(),
     });
 
     final response = await _send(() => http.post(

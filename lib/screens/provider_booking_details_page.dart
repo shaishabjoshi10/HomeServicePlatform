@@ -5,25 +5,31 @@ import '../models/booking.dart';
 import '../services/booking_service.dart';
 import 'booking_timeline.dart';
 
-/// Full detail view for one of the customer's own bookings — address,
-/// notes, timestamps, the status timeline, and the cancel/rate actions.
-/// The booking list only shows the basics and links here for everything
-/// else. This page keeps its own local copy of the booking so cancel/rate
-/// reflect immediately without waiting on the list to reload; the list
-/// re-fetches from the server itself once the user navigates back, so it
-/// always ends up showing the current state regardless.
-class BookingDetailsPage extends StatefulWidget {
+/// Full detail view for one of the provider's own bookings — customer info,
+/// address, notes, timestamps, the status timeline, and the accept/decline/
+/// journey/complete actions. Mirrors [BookingDetailsPage] (the customer-side
+/// equivalent) in layout, spacing, and button styling; only the information
+/// shown and the available actions differ, since a provider needs to see who
+/// booked them (and their phone number) and needs to move the booking through
+/// its lifecycle rather than cancel or rate it.
+///
+/// This page keeps its own local copy of the booking so accept/decline/
+/// journey/complete reflect immediately without waiting on the list to
+/// reload; the list re-fetches from the server itself once the provider
+/// navigates back, so it always ends up showing the current state regardless.
+class ProviderBookingDetailsPage extends StatefulWidget {
   final String accessToken;
   final Booking booking;
 
-  const BookingDetailsPage({super.key, required this.accessToken, required this.booking});
+  const ProviderBookingDetailsPage({super.key, required this.accessToken, required this.booking});
 
   @override
-  State<BookingDetailsPage> createState() => _BookingDetailsPageState();
+  State<ProviderBookingDetailsPage> createState() => _ProviderBookingDetailsPageState();
 }
 
-class _BookingDetailsPageState extends State<BookingDetailsPage> {
+class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage> {
   late Booking _booking;
+  bool _updating = false;
 
   @override
   void initState() {
@@ -31,33 +37,14 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
     _booking = widget.booking;
   }
 
-  Future<void> _cancelBooking() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Cancel Booking'),
-        content: Text('Cancel your booking request with ${_booking.providerName}?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('No'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red.shade600),
-            child: const Text('Yes, Cancel'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
+  Future<void> _respond(String status) async {
+    if (_updating) return;
+    setState(() => _updating = true);
     try {
       final updated = await BookingService.updateStatus(
         accessToken: widget.accessToken,
         bookingId: _booking.id,
-        status: 'cancelled',
+        status: status,
       );
       if (!mounted) return;
       setState(() => _booking = updated);
@@ -66,34 +53,8 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.message), backgroundColor: Colors.red.shade600),
       );
-    }
-  }
-
-  Future<void> _rateBooking() async {
-    final result = await showDialog<_RatingResult>(
-      context: context,
-      builder: (dialogContext) => _RatingDialog(providerName: _booking.providerName),
-    );
-
-    if (result == null) return;
-
-    try {
-      final updated = await BookingService.rateBooking(
-        accessToken: widget.accessToken,
-        bookingId: _booking.id,
-        stars: result.stars,
-        comment: result.comment,
-      );
-      if (!mounted) return;
-      setState(() => _booking = updated);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Thanks for your rating!'), backgroundColor: kPrimaryGreen),
-      );
-    } on BookingServiceException catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message), backgroundColor: Colors.red.shade600),
-      );
+    } finally {
+      if (mounted) setState(() => _updating = false);
     }
   }
 
@@ -157,7 +118,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
             Row(
               children: [
                 Expanded(
-                  child: Text(b.providerName,
+                  child: Text(b.customerName,
                       style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: kDarkText)),
                 ),
                 Container(
@@ -190,6 +151,8 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
               ),
             ],
             const SizedBox(height: 20),
+            if (b.customerPhone != null && b.customerPhone!.isNotEmpty)
+              _DetailRow(icon: Icons.phone_outlined, label: 'Phone', value: b.customerPhone!),
             _DetailRow(icon: Icons.location_on_outlined, label: 'Address', value: b.address),
             if (b.preferredDate != null)
               _DetailRow(
@@ -212,52 +175,78 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton(
-                  onPressed: _cancelBooking,
+                  onPressed: _updating ? null : () => _respond('rejected'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: Colors.red.shade600,
                     side: BorderSide(color: Colors.red.shade200),
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
-                  child: const Text('Cancel Booking'),
+                  child: const Text('Decline'),
                 ),
               ),
-            ],
-            if (b.canBeRated) ...[
               const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _rateBooking,
+                child: FilledButton(
+                  onPressed: _updating ? null : () => _respond('accepted'),
                   style: FilledButton.styleFrom(
                     backgroundColor: kPrimaryGreen,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
-                  icon: const Icon(Icons.star_outline_rounded, size: 18),
-                  label: const Text('Rate Service'),
+                  child: _updating
+                      ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                      : const Text('Accept'),
                 ),
               ),
-            ] else if (b.ratingStars != null) ...[
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  ...List.generate(
-                    5,
-                        (i) => Icon(
-                      i < b.ratingStars! ? Icons.star_rounded : Icons.star_border_rounded,
-                      size: 18,
-                      color: Colors.amber,
-                    ),
+            ],
+            if (b.status == 'accepted') ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _updating ? null : () => _respond('on_the_way'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.blue.shade600,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
-                  const SizedBox(width: 8),
-                  Text('You rated this ${b.ratingStars}/5',
-                      style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
-                ],
+                  icon: const Icon(Icons.directions_car_filled_outlined, size: 18),
+                  label: const Text("I'm on My Way"),
+                ),
               ),
-              if (b.ratingComment != null && b.ratingComment!.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text('"${b.ratingComment}"',
-                    style: TextStyle(fontSize: 13, color: Colors.grey.shade700, fontStyle: FontStyle.italic)),
-              ],
+            ],
+            if (b.status == 'on_the_way') ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _updating ? null : () => _respond('arrived'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: Colors.purple.shade600,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  icon: const Icon(Icons.location_on_outlined, size: 18),
+                  label: const Text("I've Arrived"),
+                ),
+              ),
+            ],
+            if (b.status == 'arrived') ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _updating ? null : () => _respond('completed'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: kPrimaryGreen,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
+                  label: const Text('Mark as Completed'),
+                ),
+              ),
             ],
           ],
         ),
@@ -294,87 +283,6 @@ class _DetailRow extends StatelessWidget {
           ),
         ],
       ),
-    );
-  }
-}
-
-class _RatingResult {
-  final int stars;
-  final String? comment;
-  _RatingResult(this.stars, this.comment);
-}
-
-class _RatingDialog extends StatefulWidget {
-  final String providerName;
-  const _RatingDialog({required this.providerName});
-
-  @override
-  State<_RatingDialog> createState() => _RatingDialogState();
-}
-
-class _RatingDialogState extends State<_RatingDialog> {
-  int _stars = 0;
-  final _commentController = TextEditingController();
-
-  @override
-  void dispose() {
-    _commentController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: Text('Rate ${widget.providerName}'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(5, (i) {
-              final filled = i < _stars;
-              return IconButton(
-                onPressed: () => setState(() => _stars = i + 1),
-                icon: Icon(
-                  filled ? Icons.star_rounded : Icons.star_border_rounded,
-                  color: Colors.amber,
-                  size: 32,
-                ),
-              );
-            }),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _commentController,
-            maxLength: 500,
-            maxLines: 3,
-            decoration: const InputDecoration(
-              hintText: 'Add a comment (optional)',
-              border: OutlineInputBorder(),
-            ),
-          ),
-        ],
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: _stars == 0
-              ? null
-              : () => Navigator.pop(
-            context,
-            _RatingResult(
-              _stars,
-              _commentController.text.trim().isEmpty ? null : _commentController.text.trim(),
-            ),
-          ),
-          style: FilledButton.styleFrom(backgroundColor: kPrimaryGreen),
-          child: const Text('Submit'),
-        ),
-      ],
     );
   }
 }

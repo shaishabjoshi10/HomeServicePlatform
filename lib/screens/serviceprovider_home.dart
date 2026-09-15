@@ -4,7 +4,7 @@ import '../models/booking.dart';
 import '../models/provider_profile.dart';
 import '../services/booking_service.dart';
 import '../services/provider_service.dart';
-import 'booking_detail_sheet.dart';
+import 'provider_booking_details_page.dart';
 import 'complete_profile.dart';
 import 'provider_bookings.dart';
 import 'role_selection.dart';
@@ -586,12 +586,18 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                           borderRadius: BorderRadius.circular(16),
                           onTap: isUpdating
                               ? null
-                              : () => showBookingDetailSheet(
-                                  context,
+                              : () async {
+                            await Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) => ProviderBookingDetailsPage(
+                                  accessToken: widget.accessToken,
                                   booking: b,
-                                  onAccept: () => _respondToBooking(b, 'accepted'),
-                                  onDecline: () => _respondToBooking(b, 'rejected'),
                                 ),
+                              ),
+                            );
+                            _loadBookings();
+                          },
                           child: Opacity(
                             opacity: isUpdating ? 0.5 : 1,
                             child: Container(
@@ -639,10 +645,10 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                                           style: FilledButton.styleFrom(backgroundColor: kPrimaryGreen),
                                           child: isUpdating
                                               ? const SizedBox(
-                                                  width: 16,
-                                                  height: 16,
-                                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                                                )
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                          )
                                               : const Text('Accept'),
                                         ),
                                       ),
@@ -708,11 +714,18 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                       return Column(
                         children: [
                           InkWell(
-                            onTap: () => showBookingDetailSheet(
-                              context,
-                              booking: b,
-                              onComplete: () => _respondToBooking(b, 'completed'),
-                            ),
+                            onTap: () async {
+                              await Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => ProviderBookingDetailsPage(
+                                    accessToken: widget.accessToken,
+                                    booking: b,
+                                  ),
+                                ),
+                              );
+                              _loadBookings();
+                            },
                             child: Padding(
                               padding: const EdgeInsets.all(14),
                               child: Row(

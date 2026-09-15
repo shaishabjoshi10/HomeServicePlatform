@@ -9,6 +9,7 @@ class Booking {
   final String address;
   final double? latitude;
   final double? longitude;
+  final String? problemDescription;
   final String? notes;
   final DateTime? preferredDate;
   final String status; // pending | accepted | rejected | on_the_way | arrived | completed | cancelled
@@ -32,6 +33,7 @@ class Booking {
     this.serviceCategory,
     this.latitude,
     this.longitude,
+    this.problemDescription,
     this.notes,
     this.preferredDate,
     this.ratingStars,
@@ -55,6 +57,7 @@ class Booking {
       address: json['address'] as String,
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),
+      problemDescription: json['problem_description'] as String?,
       notes: json['notes'] as String?,
       preferredDate: json['preferred_date'] != null ? DateTime.parse(json['preferred_date'] as String) : null,
       status: json['status'] as String,

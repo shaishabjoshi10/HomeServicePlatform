@@ -146,10 +146,23 @@ class Booking(Base):
     )
     service_category = Column(String(100), nullable=True)
     address = Column(String(500), nullable=False)
-    latitude = Column(Float, nullable=True)
-    longitude = Column(Float, nullable=True)
+    # NOT NULL to match BookingCreateRequest, where these are required
+    # (not Optional) fields — see the comment there. Without this, the DB
+    # would silently accept a booking row with no coordinates if it were
+    # ever inserted by anything other than the validated API path (a
+    # script, a migration, a future endpoint), even though the API itself
+    # never allows that.
+    latitude = Column(Float, nullable=False)
+    longitude = Column(Float, nullable=False)
+    # NOT NULL to match BookingCreateRequest: both are now mandatory at
+    # booking time (see schemas.BookingCreateRequest). NOTE: create_all()
+    # only creates missing tables, it does not add columns to a table that
+    # already exists — a pre-existing "bookings" table needs a manual
+    # `ALTER TABLE bookings ADD COLUMN problem_description ...` migration
+    # (and to backfill preferred_date) before this model matches it.
+    problem_description = Column(Text, nullable=False)
+    preferred_date = Column(DateTime(timezone=True), nullable=False)
     notes = Column(Text, nullable=True)
-    preferred_date = Column(DateTime(timezone=True), nullable=True)
     status = Column(
         Enum(BookingStatus, name="booking_status"),
         nullable=False,

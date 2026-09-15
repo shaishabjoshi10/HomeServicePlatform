@@ -317,6 +317,7 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
 
   Future<void> _openBookingForm(ProviderProfile provider) async {
     final pageContext = context; // survives after the sheet closes
+    final problemDescriptionController = TextEditingController();
     final notesController = TextEditingController();
     final formKey = GlobalKey<FormState>();
     DateTime? preferredDate;
@@ -385,137 +386,274 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                       const SizedBox(height: 2),
                       Text(provider.displayRole, style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
                       const SizedBox(height: 20),
-                      const Text('Address',
+                      const Text('Address *',
                           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: kDarkText)),
                       const SizedBox(height: 8),
-                      InkWell(
-                        borderRadius: BorderRadius.circular(14),
-                        onTap: () async {
-                          final result = await Navigator.push<PickedLocation>(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => LocationPickerPage(
-                                initialLocation: pickedLocation != null
-                                    ? LatLng(pickedLocation!.latitude, pickedLocation!.longitude)
-                                    : null,
-                              ),
-                            ),
-                          );
-                          if (result != null) setSheetState(() => pickedLocation = result);
+                      // Wrapped in a FormField so a missing address is caught by
+                      // formKey.currentState!.validate() along with every other
+                      // required field, and shows an inline error message right
+                      // under the picker instead of only a one-off snackbar.
+                      FormField<PickedLocation>(
+                        initialValue: pickedLocation,
+                        autovalidateMode: AutovalidateMode.onUserInteraction,
+                        // Also reject a location whose address is still the
+                        // picker's unresolved placeholder text — belt-and-
+                        // suspenders in case the picker ever hands one back
+                        // (e.g. a future regression re-opens that window),
+                        // so a booking can never go out with a fake address.
+                        validator: (value) {
+                          if (value == null) return 'Please choose your location on the map';
+                          if (value.address.trim().isEmpty ||
+                              value.address == 'Move the map to choose a location') {
+                            return 'Please wait for your address to load, then confirm it';
+                          }
+                          return null;
                         },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.grey.shade300),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Row(
+                        builder: (fieldState) {
+                          return Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Icon(Icons.location_on_outlined,
-                                  size: 18, color: pickedLocation != null ? kPrimaryGreen : Colors.grey.shade600),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  pickedLocation?.address ?? 'Choose your location on the map',
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: pickedLocation != null ? kDarkText : Colors.grey.shade600,
+                              InkWell(
+                                borderRadius: BorderRadius.circular(14),
+                                onTap: () async {
+                                  final result = await Navigator.push<PickedLocation>(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => LocationPickerPage(
+                                        initialLocation: pickedLocation != null
+                                            ? LatLng(pickedLocation!.latitude, pickedLocation!.longitude)
+                                            : null,
+                                      ),
+                                    ),
+                                  );
+                                  if (result != null) {
+                                    setSheetState(() => pickedLocation = result);
+                                    fieldState.didChange(result);
+                                  }
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                                  decoration: BoxDecoration(
+                                    border: Border.all(
+                                      color: fieldState.hasError ? Colors.red.shade400 : Colors.grey.shade300,
+                                    ),
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Icon(Icons.location_on_outlined,
+                                          size: 18,
+                                          color: pickedLocation != null ? kPrimaryGreen : Colors.grey.shade600),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          pickedLocation?.address ?? 'Choose your location on the map',
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: TextStyle(
+                                            color: pickedLocation != null ? kDarkText : Colors.grey.shade600,
+                                          ),
+                                        ),
+                                      ),
+                                      Icon(Icons.chevron_right_rounded, color: Colors.grey.shade400),
+                                    ],
                                   ),
                                 ),
                               ),
-                              Icon(Icons.chevron_right_rounded, color: Colors.grey.shade400),
+                              if (fieldState.hasError)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 6, left: 4),
+                                  child: Text(
+                                    fieldState.errorText!,
+                                    style: TextStyle(color: Colors.red.shade600, fontSize: 12),
+                                  ),
+                                ),
                             ],
-                          ),
-                        ),
+                          );
+                        },
                       ),
                       const SizedBox(height: 16),
-                      const Text('Preferred Date & Time (optional)',
+                      const Text('Preferred Date & Time *',
                           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: kDarkText)),
                       const SizedBox(height: 8),
                       Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Expanded(
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(14),
-                              onTap: () async {
-                                final picked = await showDatePicker(
-                                  context: context,
-                                  initialDate: DateTime.now().add(const Duration(days: 1)),
-                                  firstDate: DateTime.now(),
-                                  lastDate: DateTime.now().add(const Duration(days: 90)),
-                                );
-                                if (picked != null) setSheetState(() => preferredDate = picked);
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                                decoration: BoxDecoration(
-                                  border: Border.all(color: Colors.grey.shade300),
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                child: Row(
+                            // Own FormField so a missing date is caught by
+                            // formKey.currentState!.validate() along with
+                            // every other required field, with its own
+                            // inline error instead of only a snackbar.
+                            child: FormField<DateTime>(
+                              initialValue: preferredDate,
+                              autovalidateMode: AutovalidateMode.onUserInteraction,
+                              validator: (value) => value == null ? 'Select a date' : null,
+                              builder: (dateFieldState) {
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Icon(Icons.calendar_today_outlined, size: 18, color: Colors.grey.shade600),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(
-                                        preferredDate != null
-                                            ? '${preferredDate!.year}-${preferredDate!.month.toString().padLeft(2, '0')}-${preferredDate!.day.toString().padLeft(2, '0')}'
-                                            : 'Select a date',
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(color: preferredDate != null ? kDarkText : Colors.grey.shade600),
+                                    InkWell(
+                                      borderRadius: BorderRadius.circular(14),
+                                      onTap: () async {
+                                        final picked = await showDatePicker(
+                                          context: context,
+                                          initialDate: DateTime.now().add(const Duration(days: 1)),
+                                          firstDate: DateTime.now(),
+                                          lastDate: DateTime.now().add(const Duration(days: 90)),
+                                        );
+                                        if (picked != null) {
+                                          setSheetState(() => preferredDate = picked);
+                                          dateFieldState.didChange(picked);
+                                        }
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                                        decoration: BoxDecoration(
+                                          border: Border.all(
+                                            color: dateFieldState.hasError
+                                                ? Colors.red.shade400
+                                                : Colors.grey.shade300,
+                                          ),
+                                          borderRadius: BorderRadius.circular(14),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.calendar_today_outlined,
+                                                size: 18, color: Colors.grey.shade600),
+                                            const SizedBox(width: 10),
+                                            Expanded(
+                                              child: Text(
+                                                preferredDate != null
+                                                    ? '${preferredDate!.year}-${preferredDate!.month.toString().padLeft(2, '0')}-${preferredDate!.day.toString().padLeft(2, '0')}'
+                                                    : 'Select a date',
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                    color: preferredDate != null
+                                                        ? kDarkText
+                                                        : Colors.grey.shade600),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
+                                    if (dateFieldState.hasError)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 6, left: 4),
+                                        child: Text(
+                                          dateFieldState.errorText!,
+                                          style: TextStyle(color: Colors.red.shade600, fontSize: 12),
+                                        ),
+                                      ),
                                   ],
-                                ),
-                              ),
+                                );
+                              },
                             ),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
-                            child: InkWell(
-                              borderRadius: BorderRadius.circular(14),
-                              onTap: () async {
-                                final picked = await showTimePicker(
-                                  context: context,
-                                  initialTime: preferredTime ?? const TimeOfDay(hour: 9, minute: 0),
-                                );
-                                if (picked != null) setSheetState(() => preferredTime = picked);
-                              },
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                                decoration: BoxDecoration(
-                                  border: Border.all(color: Colors.grey.shade300),
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                child: Row(
+                            child: FormField<TimeOfDay>(
+                              initialValue: preferredTime,
+                              autovalidateMode: AutovalidateMode.onUserInteraction,
+                              validator: (value) => value == null ? 'Select a time' : null,
+                              builder: (timeFieldState) {
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Icon(Icons.access_time_rounded, size: 18, color: Colors.grey.shade600),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Text(
-                                        preferredTime != null ? preferredTime!.format(context) : 'Select time',
-                                        overflow: TextOverflow.ellipsis,
-                                        style: TextStyle(color: preferredTime != null ? kDarkText : Colors.grey.shade600),
+                                    InkWell(
+                                      borderRadius: BorderRadius.circular(14),
+                                      onTap: () async {
+                                        final picked = await showTimePicker(
+                                          context: context,
+                                          initialTime: preferredTime ?? const TimeOfDay(hour: 9, minute: 0),
+                                        );
+                                        if (picked != null) {
+                                          setSheetState(() => preferredTime = picked);
+                                          timeFieldState.didChange(picked);
+                                        }
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                                        decoration: BoxDecoration(
+                                          border: Border.all(
+                                            color: timeFieldState.hasError
+                                                ? Colors.red.shade400
+                                                : Colors.grey.shade300,
+                                          ),
+                                          borderRadius: BorderRadius.circular(14),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.access_time_rounded,
+                                                size: 18, color: Colors.grey.shade600),
+                                            const SizedBox(width: 10),
+                                            Expanded(
+                                              child: Text(
+                                                preferredTime != null
+                                                    ? preferredTime!.format(context)
+                                                    : 'Select time',
+                                                overflow: TextOverflow.ellipsis,
+                                                style: TextStyle(
+                                                    color: preferredTime != null
+                                                        ? kDarkText
+                                                        : Colors.grey.shade600),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
+                                    if (timeFieldState.hasError)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 6, left: 4),
+                                        child: Text(
+                                          timeFieldState.errorText!,
+                                          style: TextStyle(color: Colors.red.shade600, fontSize: 12),
+                                        ),
+                                      ),
                                   ],
-                                ),
-                              ),
+                                );
+                              },
                             ),
                           ),
                         ],
                       ),
                       const SizedBox(height: 16),
-                      const Text('Notes (optional)',
+                      const Text('Problem Description *',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: kDarkText)),
+                      const SizedBox(height: 8),
+                      TextFormField(
+                        controller: problemDescriptionController,
+                        maxLines: 3,
+                        autovalidateMode: AutovalidateMode.onUserInteraction,
+                        validator: (value) {
+                          final trimmed = value?.trim() ?? '';
+                          if (trimmed.isEmpty) return 'Please describe the problem';
+                          if (trimmed.length < 10) {
+                            return 'Please add a few more details (at least 10 characters)';
+                          }
+                          return null;
+                        },
+                        decoration: InputDecoration(
+                          hintText: 'What do you need help with? e.g. Leaking kitchen tap',
+                          filled: true,
+                          fillColor: Colors.white,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide(color: Colors.grey.shade300),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text('Additional Notes (optional)',
                           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: kDarkText)),
                       const SizedBox(height: 8),
                       TextFormField(
                         controller: notesController,
                         maxLines: 3,
                         decoration: InputDecoration(
-                          hintText: 'Describe what you need...',
+                          hintText: 'Anything else the professional should know...',
                           filled: true,
                           fillColor: Colors.white,
                           border: OutlineInputBorder(
@@ -536,27 +674,22 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                           onPressed: isSubmitting
                               ? null
                               : () async {
+                            // Runs every field's validator (address, date, time,
+                            // problem description) and, if any fails, stops the
+                            // submit and shows each inline error instead of
+                            // sending an incomplete request. Only notes is left
+                            // out of this check because it's the one optional
+                            // field.
                             if (!formKey.currentState!.validate()) return;
-                            if (pickedLocation == null) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Please choose your location on the map')),
-                              );
-                              return;
-                            }
-                            if (preferredTime != null && preferredDate == null) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Please also select a date for that time')),
-                              );
-                              return;
-                            }
-                            final DateTime? combinedDateTime = preferredDate == null
-                                ? null
-                                : DateTime(
+                            // Both guaranteed non-null here: validate() above
+                            // only passes once each FormField's own validator
+                            // (which rejects a null date/time) has passed.
+                            final combinedDateTime = DateTime(
                               preferredDate!.year,
                               preferredDate!.month,
                               preferredDate!.day,
-                              preferredTime?.hour ?? 9,
-                              preferredTime?.minute ?? 0,
+                              preferredTime!.hour,
+                              preferredTime!.minute,
                             );
                             setSheetState(() => isSubmitting = true);
                             try {
@@ -567,6 +700,7 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                                 latitude: pickedLocation!.latitude,
                                 longitude: pickedLocation!.longitude,
                                 serviceCategory: provider.serviceCategory,
+                                problemDescription: problemDescriptionController.text.trim(),
                                 notes: notesController.text.trim().isEmpty ? null : notesController.text.trim(),
                                 preferredDate: combinedDateTime,
                               );

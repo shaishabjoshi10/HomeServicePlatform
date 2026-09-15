@@ -84,7 +84,17 @@ class _LocationPickerPageState extends State<LocationPickerPage> {
   }
 
   Future<void> _useDeviceLocation({bool recenterMap = true}) async {
-    setState(() => _locatingDevice = true);
+    // Also flips _resolvingAddress, not just _locatingDevice: the "Confirm
+    // Location" button and the address label are gated on _resolvingAddress
+    // alone, so without this, the button stays enabled and _address still
+    // shows the raw 'Move the map to choose a location' placeholder for the
+    // entire time we're waiting on the device fix (up to the 10s timeout
+    // below) — a user who taps Confirm during that window sends a booking
+    // with that placeholder string as its "address" instead of a real one.
+    setState(() {
+      _locatingDevice = true;
+      _resolvingAddress = true;
+    });
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) throw Exception('Location services are off');

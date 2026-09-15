@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../main.dart';
 import '../models/booking.dart';
 import '../services/booking_service.dart';
-import 'booking_detail_sheet.dart';
+import 'provider_booking_details_page.dart';
 
 class ProviderBookingsPage extends StatefulWidget {
   final String accessToken;
@@ -219,15 +219,18 @@ class _ProviderBookingsPageState extends State<ProviderBookingsPage> {
                     borderRadius: BorderRadius.circular(16),
                     onTap: isUpdating
                         ? null
-                        : () => showBookingDetailSheet(
-                      context,
-                      booking: b,
-                      onAccept: b.status == 'pending' ? () => _respond(b, 'accepted') : null,
-                      onDecline: b.status == 'pending' ? () => _respond(b, 'rejected') : null,
-                      onStartJourney: b.status == 'accepted' ? () => _respond(b, 'on_the_way') : null,
-                      onArrived: b.status == 'on_the_way' ? () => _respond(b, 'arrived') : null,
-                      onComplete: b.status == 'arrived' ? () => _respond(b, 'completed') : null,
-                    ),
+                        : () async {
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => ProviderBookingDetailsPage(
+                            accessToken: widget.accessToken,
+                            booking: b,
+                          ),
+                        ),
+                      );
+                      _load();
+                    },
                     child: Opacity(
                       opacity: isUpdating ? 0.5 : 1,
                       child: Container(
