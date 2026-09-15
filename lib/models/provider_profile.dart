@@ -12,6 +12,7 @@ class ProviderProfile {
   final String? citizenshipBackUrl;
   final String? alternativeEmail;
   final String? alternativePhone;
+  final String? profilePictureUrl;
   final String verificationStatus;
   final bool availability;
   final double rating;
@@ -35,6 +36,7 @@ class ProviderProfile {
     this.citizenshipBackUrl,
     this.alternativeEmail,
     this.alternativePhone,
+    this.profilePictureUrl,
   });
 
   /// A friendly fallback for display when the provider hasn't set a
@@ -51,6 +53,31 @@ class ProviderProfile {
           citizenshipBackUrl != null &&
           alternativeEmail?.isNotEmpty == true;
 
+  /// Returns a copy with just the profile picture swapped — used after a
+  /// successful upload/removal so the UI updates without a network refetch.
+  ProviderProfile copyWithProfilePicture(String? profilePictureUrl) {
+    return ProviderProfile(
+      id: id,
+      userId: userId,
+      name: name,
+      city: city,
+      verificationStatus: verificationStatus,
+      availability: availability,
+      rating: rating,
+      reviewsCount: reviewsCount,
+      serviceCategory: serviceCategory,
+      experience: experience,
+      bio: bio,
+      dateOfBirth: dateOfBirth,
+      citizenshipNumber: citizenshipNumber,
+      citizenshipFrontUrl: citizenshipFrontUrl,
+      citizenshipBackUrl: citizenshipBackUrl,
+      alternativeEmail: alternativeEmail,
+      alternativePhone: alternativePhone,
+      profilePictureUrl: profilePictureUrl,
+    );
+  }
+
   factory ProviderProfile.fromJson(Map<String, dynamic> json) {
     return ProviderProfile(
       id: json['id'].toString(),
@@ -66,6 +93,7 @@ class ProviderProfile {
       citizenshipBackUrl: json['citizenship_back_url'] as String?,
       alternativeEmail: json['alternative_email'] as String?,
       alternativePhone: json['alternative_phone'] as String?,
+      profilePictureUrl: json['profile_picture_url'] as String?,
       verificationStatus: json['verification_status'] as String,
       availability: json['availability'] as bool,
       rating: (json['rating'] as num).toDouble(),

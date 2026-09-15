@@ -20,7 +20,17 @@ _ALLOWED_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 _UPLOAD_ERROR_DETAIL = "Allowed formats: JPG, JPEG, PNG. Maximum size: 5 MB per file."
 
 
-def _save_citizenship_image(user_id: uuid_module.UUID, side: str, upload: UploadFile) -> str:
+def _save_uploaded_image(
+    user_id: uuid_module.UUID,
+    subdir: str,
+    tag: str,
+    upload: UploadFile,
+) -> str:
+    """
+    Shared validate-and-save logic for any user-uploaded image (citizenship
+    documents, profile pictures, ...). Saves under
+    ``{settings.upload_dir}/{subdir}/`` and returns the served URL path.
+    """
     ext = os.path.splitext(upload.filename or "")[1].lower()
     content_type = (upload.content_type or "").lower()
 
@@ -37,15 +47,25 @@ def _save_citizenship_image(user_id: uuid_module.UUID, side: str, upload: Upload
     max_bytes = settings.max_upload_mb * 1024 * 1024
     if len(contents) > max_bytes:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_UPLOAD_ERROR_DETAIL)
+    if len(contents) == 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="The uploaded file is empty.")
 
     ext = ext or ".jpg"
-    filename = f"{user_id}_{side}_{uuid_module.uuid4().hex[:8]}{ext}"
-    directory = os.path.join(settings.upload_dir, "citizenship")
+    filename = f"{user_id}_{tag}_{uuid_module.uuid4().hex[:8]}{ext}"
+    directory = os.path.join(settings.upload_dir, subdir)
     os.makedirs(directory, exist_ok=True)
     with open(os.path.join(directory, filename), "wb") as f:
         f.write(contents)
 
-    return f"/uploads/citizenship/{filename}"
+    return f"/uploads/{subdir}/{filename}"
+
+
+def _save_citizenship_image(user_id: uuid_module.UUID, side: str, upload: UploadFile) -> str:
+    return _save_uploaded_image(user_id, "citizenship", side, upload)
+
+
+def _save_profile_picture(user_id: uuid_module.UUID, upload: UploadFile) -> str:
+    return _save_uploaded_image(user_id, "profile_pictures", "avatar", upload)
 
 
 def _delete_local_upload(url_path: str) -> None:
@@ -183,4 +203,57 @@ def upload_citizenship_documents(
 
     db.commit()
     db.refresh(profile)
+    return ProviderProfileOut.model_validate(profile)
+
+
+def _get_own_profile(current_user: User, db: Session) -> CustomerProfile | ProviderProfile:
+    model = CustomerProfile if current_user.role == UserRole.customer else ProviderProfile
+    profile = db.query(model).filter(model.user_id == current_user.id).first()
+    if not profile:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
+    return profile
+
+
+@router.post("/me/picture")
+def upload_profile_picture(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Uploads/replaces the caller's own profile picture. Works for both
+    customer and provider accounts — which table is updated depends on
+    the caller's role, same pattern as GET/PUT /api/profile/me.
+    """
+    profile = _get_own_profile(current_user, db)
+
+    new_url = _save_profile_picture(current_user.id, file)
+    if profile.profile_picture_url:
+        _delete_local_upload(profile.profile_picture_url)
+    profile.profile_picture_url = new_url
+
+    db.commit()
+    db.refresh(profile)
+
+    if current_user.role == UserRole.customer:
+        return CustomerProfileOut.model_validate(profile)
+    return ProviderProfileOut.model_validate(profile)
+
+
+@router.delete("/me/picture")
+def delete_profile_picture(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Removes the caller's profile picture, reverting to the placeholder icon."""
+    profile = _get_own_profile(current_user, db)
+
+    if profile.profile_picture_url:
+        _delete_local_upload(profile.profile_picture_url)
+        profile.profile_picture_url = None
+        db.commit()
+        db.refresh(profile)
+
+    if current_user.role == UserRole.customer:
+        return CustomerProfileOut.model_validate(profile)
     return ProviderProfileOut.model_validate(profile)

@@ -1,9 +1,13 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import '../main.dart';
 import '../models/booking.dart';
 import '../models/provider_profile.dart';
+import '../services/api_config.dart';
 import '../services/booking_service.dart';
 import '../services/provider_service.dart';
+import '../widgets/profile_picture_picker.dart';
 import 'provider_booking_details_page.dart';
 import 'complete_profile.dart';
 import 'provider_bookings.dart';
@@ -140,6 +144,23 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
     }
   }
 
+  /// Full, absolute URL for the current profile picture, or null.
+  String? get _profilePictureFullUrl =>
+      _profile?.profilePictureUrl != null ? '$apiBaseUrl${_profile!.profilePictureUrl}' : null;
+
+  Future<String?> _uploadOwnProfilePicture(File file) async {
+    final updated = await ProviderService.uploadProfilePicture(
+      accessToken: widget.accessToken,
+      file: file,
+    );
+    return updated.profilePictureUrl;
+  }
+
+  void _onProfilePictureUpdated(String? newUrl) {
+    if (_profile == null) return;
+    setState(() => _profile = _profile!.copyWithProfilePicture(newUrl));
+  }
+
   void _onNavTap(int index) {
     if (index == _profileTabIndex) {
       _showProfileMenu(context);
@@ -167,156 +188,166 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 40,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                  Row(
+        // Wrapped in a StatefulBuilder so the avatar reflects a picture
+        // change immediately, without needing to close and reopen the sheet.
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Container(
-                        width: 52,
-                        height: 52,
-                        decoration: const BoxDecoration(color: kLightGreenBg, shape: BoxShape.circle),
-                        child: const Icon(Icons.engineering_rounded, color: kPrimaryGreen, size: 26),
+                        width: 40,
+                        height: 4,
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade300,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
                       ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(widget.providerName,
-                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                            Row(
+                      Row(
+                        children: [
+                          ProfilePictureAvatar(
+                            radius: 26,
+                            placeholderIcon: Icons.engineering_rounded,
+                            imageUrl: _profilePictureFullUrl,
+                            uploadPicture: _uploadOwnProfilePicture,
+                            onPictureUpdated: (newUrl) {
+                              _onProfilePictureUpdated(newUrl);
+                              setSheetState(() {});
+                            },
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Icon(Icons.star_rounded, size: 14, color: Colors.amber),
-                                const SizedBox(width: 2),
-                                Text(
-                                  _loadingProfile
-                                      ? 'Loading…'
-                                      : _profile != null
-                                      ? '${_profile!.rating.toStringAsFixed(1)} Rating (${_profile!.reviewsCount})'
-                                      : '— Rating',
-                                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                                Text(widget.providerName,
+                                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.star_rounded, size: 14, color: Colors.amber),
+                                    const SizedBox(width: 2),
+                                    Text(
+                                      _loadingProfile
+                                          ? 'Loading…'
+                                          : _profile != null
+                                          ? '${_profile!.rating.toStringAsFixed(1)} Rating (${_profile!.reviewsCount})'
+                                          : '— Rating',
+                                      style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
+                      const Divider(height: 32),
+                      _ProfileMenuTile(
+                        icon: Icons.person_outline_rounded,
+                        label: 'Edit Profile',
+                        onTap: () async {
+                          Navigator.pop(context);
+                          if (_profile == null) return;
+                          final updated = await Navigator.push<bool>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => CompleteProfilePage(
+                                accessToken: widget.accessToken,
+                                currentProfile: _profile!,
+                              ),
+                            ),
+                          );
+                          if (updated == true) {
+                            _loadProfile();
+                          }
+                        },
+                      ),
+                      _ProfileMenuTile(
+                        icon: Icons.build_outlined,
+                        label: 'Manage Services',
+                        onTap: () {
+                          Navigator.pop(context);
+                          // TODO: navigate to manage services page
+                        },
+                      ),
+                      _ProfileMenuTile(
+                        icon: Icons.event_available_outlined,
+                        label: 'Availability & Schedule',
+                        onTap: () {
+                          Navigator.pop(context);
+                          // TODO: navigate to availability settings
+                        },
+                      ),
+                      _ProfileMenuTile(
+                        icon: Icons.account_balance_wallet_outlined,
+                        label: 'Earnings & Payouts',
+                        onTap: () {
+                          Navigator.pop(context);
+                          // TODO: navigate to earnings page
+                        },
+                      ),
+                      _ProfileMenuTile(
+                        icon: Icons.history_rounded,
+                        label: 'Job History',
+                        onTap: () {
+                          Navigator.pop(context);
+                          // TODO: navigate to job history page
+                        },
+                      ),
+                      _ProfileMenuTile(
+                        icon: Icons.verified_user_outlined,
+                        label: 'Verification & Documents',
+                        onTap: () {
+                          Navigator.pop(context);
+                          // TODO: navigate to verification page
+                        },
+                      ),
+                      _ProfileMenuTile(
+                        icon: Icons.notifications_outlined,
+                        label: 'Notifications',
+                        onTap: () {
+                          Navigator.pop(context);
+                          // TODO: navigate to notifications settings
+                        },
+                      ),
+                      _ProfileMenuTile(
+                        icon: Icons.help_outline_rounded,
+                        label: 'Help & Support',
+                        onTap: () {
+                          Navigator.pop(context);
+                          // TODO: navigate to help page
+                        },
+                      ),
+                      _ProfileMenuTile(
+                        icon: Icons.settings_outlined,
+                        label: 'Settings',
+                        onTap: () {
+                          Navigator.pop(context);
+                          // TODO: navigate to settings page
+                        },
+                      ),
+                      const Divider(height: 24),
+                      _ProfileMenuTile(
+                        icon: Icons.logout_rounded,
+                        label: 'Log Out',
+                        isDestructive: true,
+                        onTap: () {
+                          Navigator.pop(context);
+                          _confirmLogout(pageContext);
+                        },
+                      ),
+                      const SizedBox(height: 8),
                     ],
                   ),
-                  const Divider(height: 32),
-                  _ProfileMenuTile(
-                    icon: Icons.person_outline_rounded,
-                    label: 'Edit Profile',
-                    onTap: () async {
-                      Navigator.pop(context);
-                      if (_profile == null) return;
-                      final updated = await Navigator.push<bool>(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => CompleteProfilePage(
-                            accessToken: widget.accessToken,
-                            currentProfile: _profile!,
-                          ),
-                        ),
-                      );
-                      if (updated == true) {
-                        _loadProfile();
-                      }
-                    },
-                  ),
-                  _ProfileMenuTile(
-                    icon: Icons.build_outlined,
-                    label: 'Manage Services',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // TODO: navigate to manage services page
-                    },
-                  ),
-                  _ProfileMenuTile(
-                    icon: Icons.event_available_outlined,
-                    label: 'Availability & Schedule',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // TODO: navigate to availability settings
-                    },
-                  ),
-                  _ProfileMenuTile(
-                    icon: Icons.account_balance_wallet_outlined,
-                    label: 'Earnings & Payouts',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // TODO: navigate to earnings page
-                    },
-                  ),
-                  _ProfileMenuTile(
-                    icon: Icons.history_rounded,
-                    label: 'Job History',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // TODO: navigate to job history page
-                    },
-                  ),
-                  _ProfileMenuTile(
-                    icon: Icons.verified_user_outlined,
-                    label: 'Verification & Documents',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // TODO: navigate to verification page
-                    },
-                  ),
-                  _ProfileMenuTile(
-                    icon: Icons.notifications_outlined,
-                    label: 'Notifications',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // TODO: navigate to notifications settings
-                    },
-                  ),
-                  _ProfileMenuTile(
-                    icon: Icons.help_outline_rounded,
-                    label: 'Help & Support',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // TODO: navigate to help page
-                    },
-                  ),
-                  _ProfileMenuTile(
-                    icon: Icons.settings_outlined,
-                    label: 'Settings',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // TODO: navigate to settings page
-                    },
-                  ),
-                  const Divider(height: 24),
-                  _ProfileMenuTile(
-                    icon: Icons.logout_rounded,
-                    label: 'Log Out',
-                    isDestructive: true,
-                    onTap: () {
-                      Navigator.pop(context);
-                      _confirmLogout(pageContext);
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                ],
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
@@ -461,15 +492,12 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                         ],
                       ),
                     ),
-                    InkWell(
-                      onTap: () => _showProfileMenu(context),
-                      borderRadius: BorderRadius.circular(36),
-                      child: Container(
-                        width: 72,
-                        height: 72,
-                        decoration: const BoxDecoration(color: kLightGreenBg, shape: BoxShape.circle),
-                        child: const Icon(Icons.engineering_rounded, color: kPrimaryGreen, size: 36),
-                      ),
+                    ProfilePictureAvatar(
+                      radius: 36,
+                      placeholderIcon: Icons.engineering_rounded,
+                      imageUrl: _profilePictureFullUrl,
+                      uploadPicture: _uploadOwnProfilePicture,
+                      onPictureUpdated: _onProfilePictureUpdated,
                     ),
                   ],
                 ),

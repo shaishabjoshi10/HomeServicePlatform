@@ -75,6 +75,7 @@ class CustomerProfileOut(BaseModel):
     address: str | None
     latitude: float | None
     longitude: float | None
+    profile_picture_url: str | None
 
     model_config = {"from_attributes": True}
 
@@ -93,6 +94,7 @@ class ProviderProfileOut(BaseModel):
     citizenship_back_url: str | None
     alternative_email: str | None
     alternative_phone: str | None
+    profile_picture_url: str | None
     verification_status: VerificationStatus
     availability: bool
     rating: float
@@ -120,6 +122,7 @@ class ProviderPublicOut(BaseModel):
     experience: str | None
     bio: str | None
     city: str
+    profile_picture_url: str | None
     verification_status: VerificationStatus
     availability: bool
     rating: float

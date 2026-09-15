@@ -5,6 +5,7 @@ class CustomerProfile {
   final String? address;
   final double? latitude;
   final double? longitude;
+  final String? profilePictureUrl;
 
   CustomerProfile({
     required this.id,
@@ -13,6 +14,7 @@ class CustomerProfile {
     this.address,
     this.latitude,
     this.longitude,
+    this.profilePictureUrl,
   });
 
   factory CustomerProfile.fromJson(Map<String, dynamic> json) {
@@ -23,6 +25,7 @@ class CustomerProfile {
       address: json['address'] as String?,
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),
+      profilePictureUrl: json['profile_picture_url'] as String?,
     );
   }
 }

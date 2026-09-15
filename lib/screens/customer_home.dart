@@ -1,11 +1,15 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../main.dart';
 import '../models/provider_profile.dart';
+import '../services/api_config.dart';
 import '../services/booking_service.dart';
 import '../services/profile_service.dart';
 import '../services/provider_service.dart';
+import '../widgets/profile_picture_picker.dart';
 import 'location_picker.dart';
 import 'my_bookings.dart';
 import 'role_selection.dart';
@@ -34,7 +38,7 @@ class CustomerHomePage extends StatefulWidget {
 
 class _CustomerHomePageState extends State<CustomerHomePage> {
   int _navIndex = 0;
-  static const int _profileTabIndex = 4;
+  static const int _profileTabIndex = 3;
 
   final _searchController = TextEditingController();
   List<ProviderProfile> _searchResults = [];
@@ -56,6 +60,7 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
   String? _professionalsError;
 
   PickedLocation? _defaultLocation;
+  String? _profilePictureUrl;
 
   Future<void> _loadProfessionals() async {
     setState(() {
@@ -89,19 +94,37 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
     try {
       final profile = await ProfileService.getMyProfile(widget.accessToken);
       if (!mounted) return;
-      if (profile.latitude != null && profile.longitude != null && profile.address != null) {
-        setState(() {
+      setState(() {
+        _profilePictureUrl = profile.profilePictureUrl;
+        if (profile.latitude != null && profile.longitude != null && profile.address != null) {
           _defaultLocation = PickedLocation(
             latitude: profile.latitude!,
             longitude: profile.longitude!,
             address: profile.address!,
           );
-        });
-      }
+        }
+      });
     } catch (_) {
-      // Default location is a convenience, not critical — fail silently and
-      // let the user just pick a location per-booking as before.
+      // Default location/profile picture are conveniences, not critical —
+      // fail silently and let the user just pick a location per-booking,
+      // or see the placeholder avatar, as before.
     }
+  }
+
+  /// Full, absolute URL for the current profile picture, or null.
+  String? get _profilePictureFullUrl =>
+      _profilePictureUrl != null ? '$apiBaseUrl$_profilePictureUrl' : null;
+
+  Future<String?> _uploadOwnProfilePicture(File file) async {
+    final updated = await ProfileService.uploadProfilePicture(
+      accessToken: widget.accessToken,
+      file: file,
+    );
+    return updated.profilePictureUrl;
+  }
+
+  void _onProfilePictureUpdated(String? newUrl) {
+    setState(() => _profilePictureUrl = newUrl);
   }
 
   Future<void> _setDefaultLocation() async {
@@ -207,10 +230,15 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                const CircleAvatar(
+                CircleAvatar(
                   radius: 20,
                   backgroundColor: kLightGreenBg,
-                  child: Icon(Icons.person_rounded, color: kPrimaryGreen),
+                  backgroundImage: p.profilePictureUrl != null
+                      ? NetworkImage('$apiBaseUrl${p.profilePictureUrl}')
+                      : null,
+                  child: p.profilePictureUrl == null
+                      ? const Icon(Icons.person_rounded, color: kPrimaryGreen)
+                      : null,
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -791,119 +819,93 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 40,
-                    height: 4,
-                    margin: const EdgeInsets.only(bottom: 16),
-                    decoration: BoxDecoration(
-                      color: Colors.grey.shade300,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                  Row(
+        // Wrapped in a StatefulBuilder so the avatar reflects a picture
+        // change immediately, without needing to close and reopen the sheet.
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Container(
-                        width: 52,
-                        height: 52,
-                        decoration: const BoxDecoration(color: kLightGreenBg, shape: BoxShape.circle),
-                        child: const Icon(Icons.person_rounded, color: kPrimaryGreen, size: 28),
-                      ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(widget.userName,
-                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-                            Text(widget.userEmail.isNotEmpty ? widget.userEmail : 'No email on file',
-                                style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
-                          ],
+                        width: 40,
+                        height: 4,
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade300,
+                          borderRadius: BorderRadius.circular(2),
                         ),
                       ),
+                      Row(
+                        children: [
+                          ProfilePictureAvatar(
+                            radius: 26,
+                            imageUrl: _profilePictureFullUrl,
+                            uploadPicture: _uploadOwnProfilePicture,
+                            onPictureUpdated: (newUrl) {
+                              _onProfilePictureUpdated(newUrl);
+                              setSheetState(() {});
+                            },
+                          ),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(widget.userName,
+                                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                                Text(widget.userEmail.isNotEmpty ? widget.userEmail : 'No email on file',
+                                    style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const Divider(height: 32),
+                      _ProfileMenuTile(
+                        icon: Icons.person_outline_rounded,
+                        label: 'Edit Profile',
+                        onTap: () {
+                          Navigator.pop(context);
+                          // TODO: navigate to edit profile page
+                        },
+                      ),
+                      _ProfileMenuTile(
+                        icon: Icons.help_outline_rounded,
+                        label: 'Help & Support',
+                        onTap: () {
+                          Navigator.pop(context);
+                          // TODO: navigate to help page
+                        },
+                      ),
+                      _ProfileMenuTile(
+                        icon: Icons.settings_outlined,
+                        label: 'Settings',
+                        onTap: () {
+                          Navigator.pop(context);
+                          // TODO: navigate to settings page
+                        },
+                      ),
+                      const Divider(height: 24),
+                      _ProfileMenuTile(
+                        icon: Icons.logout_rounded,
+                        label: 'Log Out',
+                        isDestructive: true,
+                        onTap: () {
+                          Navigator.pop(context);
+                          _confirmLogout(pageContext);
+                        },
+                      ),
+                      const SizedBox(height: 8),
                     ],
                   ),
-                  const Divider(height: 32),
-                  _ProfileMenuTile(
-                    icon: Icons.person_outline_rounded,
-                    label: 'Edit Profile',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // TODO: navigate to edit profile page
-                    },
-                  ),
-                  _ProfileMenuTile(
-                    icon: Icons.calendar_today_outlined,
-                    label: 'My Bookings',
-                    onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(
-                        pageContext,
-                        MaterialPageRoute(builder: (_) => MyBookingsPage(accessToken: widget.accessToken)),
-                      );
-                    },
-                  ),
-                  _ProfileMenuTile(
-                    icon: Icons.location_on_outlined,
-                    label: 'Saved Addresses',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // TODO: navigate to addresses page
-                    },
-                  ),
-                  _ProfileMenuTile(
-                    icon: Icons.payment_outlined,
-                    label: 'Payment Methods',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // TODO: navigate to payment methods page
-                    },
-                  ),
-                  _ProfileMenuTile(
-                    icon: Icons.notifications_outlined,
-                    label: 'Notifications',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // TODO: navigate to notifications settings
-                    },
-                  ),
-                  _ProfileMenuTile(
-                    icon: Icons.help_outline_rounded,
-                    label: 'Help & Support',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // TODO: navigate to help page
-                    },
-                  ),
-                  _ProfileMenuTile(
-                    icon: Icons.settings_outlined,
-                    label: 'Settings',
-                    onTap: () {
-                      Navigator.pop(context);
-                      // TODO: navigate to settings page
-                    },
-                  ),
-                  const Divider(height: 24),
-                  _ProfileMenuTile(
-                    icon: Icons.logout_rounded,
-                    label: 'Log Out',
-                    isDestructive: true,
-                    onTap: () {
-                      Navigator.pop(context);
-                      _confirmLogout(pageContext);
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                ],
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
@@ -1030,15 +1032,11 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                           ],
                         ),
                       ),
-                      InkWell(
-                        onTap: () => _showProfileMenu(context),
-                        borderRadius: BorderRadius.circular(36),
-                        child: Container(
-                          width: 72,
-                          height: 72,
-                          decoration: const BoxDecoration(color: kLightGreenBg, shape: BoxShape.circle),
-                          child: const Icon(Icons.person_rounded, color: kPrimaryGreen, size: 36),
-                        ),
+                      ProfilePictureAvatar(
+                        radius: 36,
+                        imageUrl: _profilePictureFullUrl,
+                        uploadPicture: _uploadOwnProfilePicture,
+                        onPictureUpdated: _onProfilePictureUpdated,
                       ),
                     ],
                   ),
@@ -1190,7 +1188,6 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'Home'),
           NavigationDestination(icon: Icon(Icons.calendar_today_outlined), selectedIcon: Icon(Icons.calendar_today_rounded), label: 'Bookings'),
           NavigationDestination(icon: Icon(Icons.chat_bubble_outline_rounded), selectedIcon: Icon(Icons.chat_bubble_rounded), label: 'Messages'),
-          NavigationDestination(icon: Icon(Icons.local_offer_outlined), selectedIcon: Icon(Icons.local_offer_rounded), label: 'Offers'),
           NavigationDestination(icon: Icon(Icons.person_outline_rounded), selectedIcon: Icon(Icons.person_rounded), label: 'Profile'),
         ],
       ),
@@ -1299,10 +1296,15 @@ class _ProviderListTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            const CircleAvatar(
+            CircleAvatar(
               radius: 26,
               backgroundColor: kLightGreenBg,
-              child: Icon(Icons.person_rounded, color: kPrimaryGreen),
+              backgroundImage: provider.profilePictureUrl != null
+                  ? NetworkImage('$apiBaseUrl${provider.profilePictureUrl}')
+                  : null,
+              child: provider.profilePictureUrl == null
+                  ? const Icon(Icons.person_rounded, color: kPrimaryGreen)
+                  : null,
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -1525,10 +1527,15 @@ class _AllProfessionalsPage extends StatelessWidget {
                 ),
                 child: Row(
                   children: [
-                    const CircleAvatar(
+                    CircleAvatar(
                       radius: 26,
                       backgroundColor: kLightGreenBg,
-                      child: Icon(Icons.person_rounded, color: kPrimaryGreen),
+                      backgroundImage: p.profilePictureUrl != null
+                          ? NetworkImage('$apiBaseUrl${p.profilePictureUrl}')
+                          : null,
+                      child: p.profilePictureUrl == null
+                          ? const Icon(Icons.person_rounded, color: kPrimaryGreen)
+                          : null,
                     ),
                     const SizedBox(width: 14),
                     Expanded(

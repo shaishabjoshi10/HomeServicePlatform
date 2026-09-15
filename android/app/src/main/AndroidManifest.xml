@@ -7,6 +7,15 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 
+    <!-- Camera permission for taking profile/document photos -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+
+    <!-- Gallery/image permissions -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"/>
+
     <application
         android:label="homeserviceplatform"
         android:name="${applicationName}"

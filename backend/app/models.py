@@ -80,6 +80,11 @@ class CustomerProfile(Base):
     address = Column(String(500), nullable=True)
     latitude = Column(Float, nullable=True)
     longitude = Column(Float, nullable=True)
+
+    # Served URL path (e.g. "/uploads/profile_pictures/<file>"), not a raw
+    # filesystem path — mirrors the citizenship_*_url convention below.
+    profile_picture_url = Column(String(500), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -99,6 +104,10 @@ class ProviderProfile(Base):
     service_category = Column(String(100), nullable=True, index=True)
     experience = Column(String(50), nullable=True)  # a range label, e.g. "1-3 years"
     bio = Column(Text, nullable=True)
+
+    # Served URL path (e.g. "/uploads/profile_pictures/<file>"), not a raw
+    # filesystem path — same convention as citizenship_*_url below.
+    profile_picture_url = Column(String(500), nullable=True)
 
     # Personal info, filled in via the "Complete your profile" flow. The
     # app currently only serves Kathmandu, so city is a fixed default

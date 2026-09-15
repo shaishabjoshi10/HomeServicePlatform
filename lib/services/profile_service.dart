@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 
@@ -18,15 +19,15 @@ class ProfileService {
   static const String _baseUrl = '$apiBaseUrl/api/profile';
 
   static Map<String, String> _authHeaders(String accessToken) => {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $accessToken',
-      };
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer $accessToken',
+  };
 
   static Future<CustomerProfile> getMyProfile(String accessToken) async {
     final response = await _send(() => http.get(
-          Uri.parse('$_baseUrl/me'),
-          headers: _authHeaders(accessToken),
-        ));
+      Uri.parse('$_baseUrl/me'),
+      headers: _authHeaders(accessToken),
+    ));
     _checkStatus(response, expected: 200);
     return CustomerProfile.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
@@ -40,14 +41,48 @@ class ProfileService {
     required double longitude,
   }) async {
     final response = await _send(() => http.put(
-          Uri.parse('$_baseUrl/me'),
-          headers: _authHeaders(accessToken),
-          body: jsonEncode({
-            'address': address,
-            'latitude': latitude,
-            'longitude': longitude,
-          }),
-        ));
+      Uri.parse('$_baseUrl/me'),
+      headers: _authHeaders(accessToken),
+      body: jsonEncode({
+        'address': address,
+        'latitude': latitude,
+        'longitude': longitude,
+      }),
+    ));
+    _checkStatus(response, expected: 200);
+    return CustomerProfile.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  /// Uploads/replaces the customer's profile picture via
+  /// POST /api/profile/me/picture (multipart).
+  static Future<CustomerProfile> uploadProfilePicture({
+    required String accessToken,
+    required File file,
+  }) async {
+    final uri = Uri.parse('$_baseUrl/me/picture');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers['Authorization'] = 'Bearer $accessToken'
+      ..files.add(await http.MultipartFile.fromPath('file', file.path));
+
+    http.Response response;
+    try {
+      final streamed = await request.send().timeout(const Duration(seconds: 30));
+      response = await http.Response.fromStream(streamed);
+    } on TimeoutException {
+      throw ProfileServiceException('Upload timed out. Please check your connection.');
+    } catch (_) {
+      throw ProfileServiceException('Unable to reach the server. Please check your connection.');
+    }
+    _checkStatus(response, expected: 200);
+    return CustomerProfile.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  /// Removes the customer's profile picture via DELETE /api/profile/me/picture.
+  static Future<CustomerProfile> deleteProfilePicture(String accessToken) async {
+    final response = await _send(() => http.delete(
+      Uri.parse('$_baseUrl/me/picture'),
+      headers: _authHeaders(accessToken),
+    ));
     _checkStatus(response, expected: 200);
     return CustomerProfile.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }

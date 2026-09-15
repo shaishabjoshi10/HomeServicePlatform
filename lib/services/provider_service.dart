@@ -279,6 +279,70 @@ class ProviderService {
     }
   }
 
+  /// Uploads/replaces the provider's profile picture via
+  /// POST /api/profile/me/picture (multipart).
+  static Future<ProviderProfile> uploadProfilePicture({
+    required String accessToken,
+    required File file,
+  }) async {
+    final uri = Uri.parse('$apiBaseUrl/api/profile/me/picture');
+    final request = http.MultipartRequest('POST', uri)
+      ..headers['Authorization'] = 'Bearer $accessToken'
+      ..files.add(await http.MultipartFile.fromPath('file', file.path));
+
+    http.Response response;
+    try {
+      final streamed = await request.send().timeout(const Duration(seconds: 30));
+      response = await http.Response.fromStream(streamed);
+    } on TimeoutException {
+      throw ProviderServiceException('Upload timed out. Please check your connection.');
+    } catch (_) {
+      throw ProviderServiceException('Unable to reach the server. Please check your connection.');
+    }
+
+    if (response.statusCode == 401) {
+      throw ProviderServiceException('Your session has expired. Please log in again.');
+    }
+    if (response.statusCode != 200) {
+      throw ProviderServiceException(_extractDetail(response) ?? 'Failed to upload profile picture.');
+    }
+
+    try {
+      return ProviderProfile.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    } catch (_) {
+      throw ProviderServiceException('Unexpected response from server.');
+    }
+  }
+
+  /// Removes the provider's profile picture via DELETE /api/profile/me/picture.
+  static Future<ProviderProfile> deleteProfilePicture(String accessToken) async {
+    final uri = Uri.parse('$apiBaseUrl/api/profile/me/picture');
+
+    http.Response response;
+    try {
+      response = await http
+          .delete(uri, headers: {'Authorization': 'Bearer $accessToken'})
+          .timeout(const Duration(seconds: 15));
+    } on TimeoutException {
+      throw ProviderServiceException('Request timed out. Please check your connection.');
+    } catch (_) {
+      throw ProviderServiceException('Unable to reach the server. Please check your connection.');
+    }
+
+    if (response.statusCode == 401) {
+      throw ProviderServiceException('Your session has expired. Please log in again.');
+    }
+    if (response.statusCode != 200) {
+      throw ProviderServiceException(_extractDetail(response) ?? 'Failed to remove profile picture.');
+    }
+
+    try {
+      return ProviderProfile.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    } catch (_) {
+      throw ProviderServiceException('Unexpected response from server.');
+    }
+  }
+
   static String? _extractDetail(http.Response response) {
     try {
       final data = jsonDecode(response.body) as Map<String, dynamic>;
