@@ -20,6 +20,12 @@ class _Category {
   const _Category(this.name, this.icon);
 }
 
+class _ServiceJob {
+  final String name;
+  final String description;
+  const _ServiceJob(this.name, this.description);
+}
+
 class CustomerHomePage extends StatefulWidget {
   final String userName;
   final String userEmail;
@@ -54,6 +60,110 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
     _Category('Pest Control', Icons.pest_control_outlined),
     _Category('More', Icons.more_horiz_rounded),
   ];
+
+  // 2–3 specific jobs shown when a customer taps a main service category,
+  // before they get to the booking form. Keyed by category name (must match
+  // `_categories` above and `ProviderProfile.serviceCategory` values).
+  static const Map<String, List<_ServiceJob>> _categoryJobs = {
+    'Cleaning': [
+      _ServiceJob(
+        'Deep House Cleaning',
+        'A thorough top-to-bottom clean covering floors, windows, kitchen surfaces, and bathrooms — ideal before a festival, move-in, or move-out.',
+      ),
+      _ServiceJob(
+        'Bathroom & Kitchen Cleaning',
+        'Focused scrubbing and sanitizing of tiles, sinks, and stovetops to cut through built-up grease and grime.',
+      ),
+      _ServiceJob(
+        'Sofa & Carpet Cleaning',
+        'Steam or shampoo cleaning for sofas, carpets, and rugs to lift dust, stains, and odours.',
+      ),
+    ],
+    'Plumbing': [
+      _ServiceJob(
+        'Leak & Pipe Repair',
+        'Fixing leaking taps, pipes, and joints to stop water wastage and prevent damage to walls and floors.',
+      ),
+      _ServiceJob(
+        'Tap & Fixture Installation',
+        'Installing or replacing taps, showers, and wash-basin fittings.',
+      ),
+      _ServiceJob(
+        'Water Tank Cleaning',
+        'Draining, scrubbing, and sanitizing overhead or underground water tanks.',
+      ),
+    ],
+    'Electrical': [
+      _ServiceJob(
+        'Switchboard & Socket Repair',
+        'Fixing faulty switches, sockets, and switchboards, including sparking or tripping issues.',
+      ),
+      _ServiceJob(
+        'Wiring & Rewiring',
+        'Inspecting and replacing old or unsafe household wiring.',
+      ),
+      _ServiceJob(
+        'Fan & Light Installation',
+        'Installing or repairing ceiling fans, tube lights, and other light fixtures.',
+      ),
+    ],
+    'Carpentry': [
+      _ServiceJob(
+        'Furniture Repair',
+        'Fixing broken chairs, tables, cupboards, and other wooden furniture.',
+      ),
+      _ServiceJob(
+        'Door & Window Fitting',
+        'Repairing or installing doors, windows, hinges, and locks that stick or don\'t close properly.',
+      ),
+      _ServiceJob(
+        'Custom Furniture Assembly',
+        'Assembling flat-pack or made-to-order furniture at your home.',
+      ),
+    ],
+    'Painting': [
+      _ServiceJob(
+        'Interior Wall Painting',
+        'Full or touch-up painting for bedrooms, living rooms, and ceilings.',
+      ),
+      _ServiceJob(
+        'Exterior Wall Painting',
+        'Weatherproof painting for outside walls and boundary walls.',
+      ),
+      _ServiceJob(
+        'Waterproofing & Wall Repair',
+        'Treating damp patches, cracks, and seepage before repainting.',
+      ),
+    ],
+    'Appliance Repair': [
+      _ServiceJob(
+        'Washing Machine Repair',
+        'Diagnosing and fixing drainage, spinning, or power issues.',
+      ),
+      _ServiceJob(
+        'Refrigerator Repair',
+        'Fixing cooling problems, unusual noise, or leaks.',
+      ),
+      _ServiceJob(
+        'Microwave & Oven Repair',
+        'Repairing heating and control issues on microwaves and ovens.',
+      ),
+    ],
+    'Pest Control': [
+      _ServiceJob(
+        'General Pest Control',
+        'Treatment for common household pests like cockroaches and ants.',
+      ),
+      _ServiceJob(
+        'Termite Treatment',
+        'Targeted treatment for termite infestations in wooden furniture and structures.',
+      ),
+      _ServiceJob(
+        'Rodent Control',
+        'Safe trapping and prevention measures for mice and rats.',
+      ),
+    ],
+  };
 
   List<ProviderProfile> _professionals = [];
   bool _loadingProfessionals = true;
@@ -312,17 +422,65 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
       _openAllServices();
       return;
     }
-    final results = _professionals.where((p) => p.serviceCategory == categoryName).toList();
+    // Tapping a main category now shows the 2–3 specific jobs under it
+    // first, rather than dropping straight into a provider list.
+    final providers = _professionals.where((p) => p.serviceCategory == categoryName).toList();
+    final jobs = _categoryJobs[categoryName] ?? const <_ServiceJob>[];
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => _CategoryResultsPage(
+        builder: (_) => _ServiceJobsPage(
           categoryName: categoryName,
-          providers: results,
+          jobs: jobs,
+          providers: providers,
+          onSelectJob: (job) => _openJobDetail(categoryName, job, providers),
           onBook: _openBookingForm,
         ),
       ),
     );
+  }
+
+  void _openJobDetail(String categoryName, _ServiceJob job, List<ProviderProfile> providers) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _ServiceJobDetailPage(
+          categoryName: categoryName,
+          job: job,
+          onBookService: () => _matchProviderAndBookService(categoryName, job, providers),
+        ),
+      ),
+    );
+  }
+
+  /// Picks a provider for the tapped job (preferring an available one, then
+  /// highest rating, then most reviews) and opens the existing booking form
+  /// for them. Booking still always requires a specific provider_id
+  /// server-side, so this is a lightweight auto-match rather than a manual
+  /// pick — the customer can still browse and choose a specific professional
+  /// instead via the "Browse professionals" link on the jobs page.
+  Future<void> _matchProviderAndBookService(
+    String categoryName,
+    _ServiceJob job,
+    List<ProviderProfile> providers,
+  ) async {
+    if (providers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No professionals currently offer $categoryName services. Please check back soon.'),
+          backgroundColor: Colors.red.shade600,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+    final ranked = [...providers]..sort((a, b) {
+      if (a.availability != b.availability) return a.availability ? -1 : 1;
+      final byRating = b.rating.compareTo(a.rating);
+      if (byRating != 0) return byRating;
+      return b.reviewsCount.compareTo(a.reviewsCount);
+    });
+    await _openBookingForm(ranked.first, jobTitle: job.name);
   }
 
   void _openAllServices() {
@@ -343,7 +501,7 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
     );
   }
 
-  Future<void> _openBookingForm(ProviderProfile provider) async {
+  Future<void> _openBookingForm(ProviderProfile provider, {String? jobTitle}) async {
     final pageContext = context; // survives after the sheet closes
     final problemDescriptionController = TextEditingController();
     final notesController = TextEditingController();
@@ -409,10 +567,15 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                           ),
                         ),
                       ),
-                      Text('Book ${provider.name}',
+                      Text(jobTitle ?? 'Book ${provider.name}',
                           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: kDarkText)),
                       const SizedBox(height: 2),
-                      Text(provider.displayRole, style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+                      Text(
+                        jobTitle != null
+                            ? 'Matched with ${provider.name} • ${provider.displayRole}'
+                            : provider.displayRole,
+                        style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                      ),
                       const SizedBox(height: 20),
                       const Text('Address *',
                           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: kDarkText)),
@@ -584,7 +747,16 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                             child: FormField<TimeOfDay>(
                               initialValue: preferredTime,
                               autovalidateMode: AutovalidateMode.onUserInteraction,
-                              validator: (value) => value == null ? 'Select a time' : null,
+                              validator: (value) {
+                                if (value == null) return 'Select a time';
+                                final minutesSinceMidnight = value.hour * 60 + value.minute;
+                                const earliest = 8 * 60; // 8:00 AM
+                                const latest = 22 * 60; // 10:00 PM
+                                if (minutesSinceMidnight < earliest || minutesSinceMidnight > latest) {
+                                  return 'Choose a time between 8:00 AM and 10:00 PM';
+                                }
+                                return null;
+                              },
                               builder: (timeFieldState) {
                                 return Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1340,6 +1512,186 @@ class _ProviderListTile extends StatelessWidget {
             ),
             Icon(Icons.chevron_right_rounded, color: Colors.grey.shade400),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Category tap → 2–3 specific jobs under that category ──
+class _ServiceJobsPage extends StatelessWidget {
+  final String categoryName;
+  final List<_ServiceJob> jobs;
+  final List<ProviderProfile> providers;
+  final ValueChanged<_ServiceJob> onSelectJob;
+  final ValueChanged<ProviderProfile> onBook;
+
+  const _ServiceJobsPage({
+    required this.categoryName,
+    required this.jobs,
+    required this.providers,
+    required this.onSelectJob,
+    required this.onBook,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        title: Text(categoryName),
+        backgroundColor: Colors.white,
+        foregroundColor: kDarkText,
+        elevation: 0,
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(20),
+        children: [
+          const Text(
+            'What do you need help with?',
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: kDarkText),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Pick the job that matches your need best.',
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+          ),
+          const SizedBox(height: 16),
+          if (jobs.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Text(
+                'No specific jobs are listed for $categoryName yet.',
+                style: TextStyle(color: Colors.grey.shade600),
+              ),
+            )
+          else
+            ...jobs.map(
+              (job) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () => onSelectJob(job),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade200),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration: const BoxDecoration(color: kLightGreenBg, shape: BoxShape.circle),
+                          child: const Icon(Icons.build_outlined, color: kPrimaryGreen),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(job.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                              const SizedBox(height: 4),
+                              Text(
+                                job.description,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Icon(Icons.chevron_right_rounded, color: Colors.grey.shade400),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          const SizedBox(height: 8),
+          Center(
+            child: TextButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => _CategoryResultsPage(
+                      categoryName: categoryName,
+                      providers: providers,
+                      onBook: onBook,
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.people_outline_rounded, color: kPrimaryGreen),
+              label: const Text('Browse professionals in this category', style: TextStyle(color: kPrimaryGreen)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Job tap → its description and a "Book Service" button ──
+class _ServiceJobDetailPage extends StatelessWidget {
+  final String categoryName;
+  final _ServiceJob job;
+  final Future<void> Function() onBookService;
+
+  const _ServiceJobDetailPage({
+    required this.categoryName,
+    required this.job,
+    required this.onBookService,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        title: Text(categoryName),
+        backgroundColor: Colors.white,
+        foregroundColor: kDarkText,
+        elevation: 0,
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: const BoxDecoration(color: kLightGreenBg, shape: BoxShape.circle),
+                child: const Icon(Icons.build_outlined, color: kPrimaryGreen, size: 28),
+              ),
+              const SizedBox(height: 16),
+              Text(job.name, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: kDarkText)),
+              const SizedBox(height: 4),
+              Text(categoryName, style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+              const SizedBox(height: 16),
+              Text(
+                job.description,
+                style: TextStyle(fontSize: 14, height: 1.5, color: Colors.grey.shade800),
+              ),
+              const Spacer(),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: kPrimaryGreen,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  onPressed: () => onBookService(),
+                  child: const Text('Book Service', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
