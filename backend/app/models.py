@@ -11,6 +11,7 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
+    Numeric,
     String,
     Text,
     UniqueConstraint,
@@ -133,11 +134,9 @@ class ProviderProfile(Base):
     )
     availability = Column(Boolean, nullable=False, default=True)
 
-    # Not in the original spec, but the existing "Top Rated Professionals"
-    # UI needs a rating to display — remove if you're tracking this
-    # elsewhere (e.g. a separate reviews table).
-    rating = Column(Float, nullable=False, default=0.0)
-    reviews_count = Column(Integer, nullable=False, default=0)
+    # Note: providers deliberately carry no rating of their own. Customers
+    # rate the overall *service* (see `Rating` below), not the individual
+    # person who happened to do the job.
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -154,6 +153,22 @@ class Booking(Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
     service_category = Column(String(100), nullable=True)
+    # The specific job booked under that category (e.g. "Fan Installation"
+    # under "Electrical"), plus the price it was booked at. Nullable for
+    # backward compatibility with bookings made before jobs had prices, and
+    # because a category with no listed jobs still books straight through.
+    job_title = Column(String(150), nullable=True, index=True)
+    # A *snapshot* of the catalogue price at the moment of booking, not a
+    # live lookup: if the price of a job is changed in app.constants later,
+    # bookings already placed keep the figure the customer actually agreed
+    # to. Set server-side from the catalogue — never from the client.
+    price = Column(Numeric(10, 2), nullable=True)
+    # PriceType.value — "fixed" or "starting_from". Stored as a plain string
+    # rather than a Postgres enum deliberately: adding a new pricing mode
+    # then needs no ALTER TYPE migration on an existing database, unlike
+    # booking_status (see the startup helper in main.py). The allowed values
+    # are enforced by the API layer (schemas.py).
+    price_type = Column(String(20), nullable=True)
     address = Column(String(500), nullable=False)
     # NOT NULL to match BookingCreateRequest, where these are required
     # (not Optional) fields — see the comment there. Without this, the DB
@@ -184,16 +199,18 @@ class Booking(Base):
 
 class Rating(Base):
     """
-    A customer's rating of a provider for one completed booking. Exactly
-    one rating per booking — enforced both at the DB level (unique
-    constraint on booking_id, so it holds even under concurrent requests)
-    and by the route (which also checks the booking is 'completed' and
-    belongs to the requesting customer before allowing it).
+    A customer's rating of the overall service for one completed booking.
+    It is a rating of the service (e.g. "Plumbing"), not of whichever
+    provider was assigned to the job. Exactly one rating per booking —
+    enforced both at the DB level (unique constraint on booking_id, so it
+    holds even under concurrent requests) and by the route (which also
+    checks the booking is 'completed' and belongs to the requesting
+    customer before allowing it).
 
-    customer_id/provider_id reference users.id, mirroring Booking, so
-    they can be queried the same way. provider_id is denormalized from
-    the booking here purely so the average can be aggregated with a
-    single query filtered on Rating alone.
+    service_category is copied from the booking when the rating is
+    created, purely so a service's overall rating can be aggregated with a
+    single GROUP BY on this table alone. There is intentionally no
+    provider_id here.
     """
 
     __tablename__ = "ratings"
@@ -209,9 +226,7 @@ class Rating(Base):
     customer_id = Column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    provider_id = Column(
-        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    service_category = Column(String(100), nullable=True, index=True)
     stars = Column(Integer, nullable=False)
     comment = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

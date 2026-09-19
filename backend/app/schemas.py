@@ -2,9 +2,15 @@ import re
 import uuid
 from datetime import date, datetime, timezone
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from app.constants import DEFAULT_CITY, EXPERIENCE_RANGES
+from app.constants import (
+    DEFAULT_CITY,
+    EXPERIENCE_RANGES,
+    SERVICE_CATEGORIES,
+    PriceType,
+    find_service_job,
+)
 from app.models import BookingStatus, UserRole, VerificationStatus
 
 # A provider must be at least this old — sanity bound for date_of_birth.
@@ -97,36 +103,6 @@ class ProviderProfileOut(BaseModel):
     profile_picture_url: str | None
     verification_status: VerificationStatus
     availability: bool
-    rating: float
-    reviews_count: int
-
-    model_config = {"from_attributes": True}
-
-
-class ProviderPublicOut(BaseModel):
-    """
-    What customers see when browsing providers (GET /api/providers). Unlike
-    ProviderProfileOut, this deliberately excludes citizenship details,
-    alternative contact info, and precise address — those are only for the
-    provider themselves (GET /api/profile/me) and for admin verification.
-
-    user_id IS included (unlike the fields above) because it isn't
-    sensitive and the client needs it: booking creation targets a User id
-    (Booking.provider_id -> users.id), not this profile's own id.
-    """
-
-    id: uuid.UUID
-    user_id: uuid.UUID
-    name: str
-    service_category: str | None
-    experience: str | None
-    bio: str | None
-    city: str
-    profile_picture_url: str | None
-    verification_status: VerificationStatus
-    availability: bool
-    rating: float
-    reviews_count: int
 
     model_config = {"from_attributes": True}
 
@@ -215,14 +191,29 @@ class ProfileOptionsOut(BaseModel):
 
 class BookingCreateRequest(BaseModel):
     """
-    Mandatory fields: provider_id, address (+ coordinates), preferred_date,
-    and problem_description. notes is the only optional field — see each
-    field's validator below for what "filled with valid information" means
-    for it (non-blank after stripping whitespace, not just non-null).
+    Mandatory fields: service_category, address (+ coordinates),
+    preferred_date, and problem_description. notes is the only optional
+    field — see each field's validator below for what "filled with valid
+    information" means for it (non-blank after stripping whitespace, not
+    just non-null).
+
+    There is deliberately no provider_id: customers book a *service*, and
+    the server assigns a suitable provider itself (see bookings.py).
     """
 
-    provider_id: uuid.UUID
-    service_category: str | None = Field(default=None, max_length=100)
+    # Which service is being booked. Must be one of SERVICE_CATEGORIES —
+    # it's what the server matches a provider on, and what the booking's
+    # rating is later attributed to.
+    service_category: str = Field(min_length=1, max_length=100)
+    # Which specific job under that category is being booked (e.g. "Fan
+    # Installation" under "Electrical"). Optional, because a category with
+    # no jobs listed for it books straight through at category level.
+    #
+    # Note there is deliberately no `price` field: the client displays the
+    # price but never sends it. The server looks the job's price up in the
+    # catalogue itself (app.constants.SERVICE_JOBS), so a customer can't
+    # book a Rs. 3,500 termite treatment for Rs. 5 by editing the request.
+    job_title: str | None = Field(default=None, max_length=150)
     address: str = Field(min_length=3, max_length=500)
     # Required, not optional: the client always sends these together with
     # the address (they come from the same map picker), so a booking with
@@ -243,6 +234,14 @@ class BookingCreateRequest(BaseModel):
     # on top of the required problem description.
     notes: str | None = Field(default=None, max_length=1000)
 
+    @field_validator("service_category")
+    @classmethod
+    def service_category_must_be_known(cls, v: str) -> str:
+        v = v.strip()
+        if v not in SERVICE_CATEGORIES:
+            raise ValueError("Please choose a valid service.")
+        return v
+
     @field_validator("address")
     @classmethod
     def address_must_not_be_blank(cls, v: str) -> str:
@@ -260,6 +259,33 @@ class BookingCreateRequest(BaseModel):
             raise ValueError("Please describe the problem in at least 10 characters.")
         return v
 
+    @field_validator("job_title")
+    @classmethod
+    def normalize_job_title(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None
+
+    @model_validator(mode="after")
+    def job_must_belong_to_service(self) -> "BookingCreateRequest":
+        # Needs both fields, hence a model validator rather than a field one.
+        # Rejecting an unknown job outright (instead of quietly dropping it)
+        # keeps a booking from being created with no price when the client
+        # and server catalogues have drifted apart — better a clear error
+        # than a silently unpriced job.
+        if self.job_title is None:
+            return self
+        job = find_service_job(self.service_category, self.job_title)
+        if job is None:
+            raise ValueError(
+                f"'{self.job_title}' is not a job offered under {self.service_category}."
+            )
+        # Store the catalogue's own spelling, so every booking of the same
+        # job groups together regardless of how the client cased it.
+        object.__setattr__(self, "job_title", job.name)
+        return self
+
 
 class BookingStatusUpdateRequest(BaseModel):
     status: BookingStatus
@@ -270,9 +296,15 @@ class BookingOut(BaseModel):
     customer_id: uuid.UUID
     customer_name: str
     customer_phone: str | None
-    provider_id: uuid.UUID
-    provider_name: str
     service_category: str | None
+    # The specific job booked and what it was priced at. All three are None
+    # for a category-level booking, and for any booking made before service
+    # pricing existed. price_label is derived, not stored — it's the
+    # display string for price + price_type (e.g. "From Rs. 2,500").
+    job_title: str | None = None
+    price: float | None = None
+    price_type: PriceType | None = None
+    price_label: str | None = None
     address: str
     latitude: float | None
     longitude: float | None
@@ -285,7 +317,8 @@ class BookingOut(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    # Present only once the customer has rated this booking. Kept inline
+    # Present only once the customer has rated this booking (a rating of
+    # the overall service, not of a provider). Kept inline
     # here (rather than a separate "did I rate this?" endpoint) so the
     # booking list can show/hide the "Rate" button with no extra request.
     rating_stars: int | None = None
@@ -304,9 +337,47 @@ class RatingOut(BaseModel):
     id: uuid.UUID
     booking_id: uuid.UUID
     customer_id: uuid.UUID
-    provider_id: uuid.UUID
+    service_category: str | None
     stars: int
     comment: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class ServiceRatingOut(BaseModel):
+    """
+    A service's overall rating: the average of every customer rating left
+    on completed bookings of that service. rating is 0.0 and reviews_count
+    is 0 for a service nobody has rated yet.
+    """
+
+    service_category: str
+    rating: float
+    reviews_count: int
+
+
+class ServiceJobOut(BaseModel):
+    """
+    One specific, bookable job under a service category, with its price.
+
+    price_label is what the app actually renders ("Rs. 500", or
+    "From Rs. 2,500" for starting-from pricing); price and price_type are
+    sent alongside it so the client can sort, filter, or format differently
+    without having to parse the label back apart.
+    """
+
+    name: str
+    description: str
+    price: float
+    price_type: PriceType
+    price_label: str
+
+
+class ServiceCatalogEntryOut(BaseModel):
+    """A service category with its priced jobs and its overall rating."""
+
+    service_category: str
+    rating: float
+    reviews_count: int
+    jobs: list[ServiceJobOut]

@@ -190,7 +190,7 @@ class _ProfilePictureAvatarState extends State<ProfilePictureAvatar> {
     if (code.contains('denied') || code.contains('permission')) {
       _showMessage(
         'Permission was denied. Enable ${source == ImageSource.camera ? 'camera' : 'photo library'} '
-        'access in your device Settings to continue.',
+            'access in your device Settings to continue.',
       );
     } else {
       _showMessage('Something went wrong opening the ${source == ImageSource.camera ? 'camera' : 'gallery'}.');

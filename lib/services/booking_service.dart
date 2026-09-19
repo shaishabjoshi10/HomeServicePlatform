@@ -22,29 +22,40 @@ class BookingService {
     'Authorization': 'Bearer $accessToken',
   };
 
-  /// address/latitude/longitude, preferredDate, and problemDescription are
-  /// all mandatory — the booking form only calls this once every one of
-  /// them is filled with valid, non-blank information. notes is the only
-  /// field that stays optional.
+  /// serviceCategory, address/latitude/longitude, preferredDate, and
+  /// problemDescription are all mandatory — the booking form only calls
+  /// this once every one of them is filled with valid, non-blank
+  /// information. notes is the only field that stays optional.
+  ///
+  /// jobTitle is the specific job picked under the service (e.g. "Fan
+  /// Installation" under "Electrical"). It's optional because a category
+  /// with no jobs listed books straight through at category level.
+  ///
+  /// The job's price is deliberately *not* sent: the server looks it up in
+  /// its own catalogue and snapshots it onto the booking, so what the
+  /// customer is charged can't be altered from the client.
+  ///
+  /// There is no provider argument: customers book a service and the
+  /// server assigns a suitable provider itself.
   static Future<Booking> createBooking({
     required String accessToken,
-    required String providerId,
+    required String serviceCategory,
+    String? jobTitle,
     required String address,
     required double latitude,
     required double longitude,
     required DateTime preferredDate,
     required String problemDescription,
-    String? serviceCategory,
     String? notes,
   }) async {
     final body = jsonEncode({
-      'provider_id': providerId,
+      'service_category': serviceCategory,
+      if (jobTitle != null && jobTitle.isNotEmpty) 'job_title': jobTitle,
       'address': address,
       'latitude': latitude,
       'longitude': longitude,
       'preferred_date': preferredDate.toIso8601String(),
       'problem_description': problemDescription,
-      if (serviceCategory != null && serviceCategory.isNotEmpty) 'service_category': serviceCategory,
       if (notes != null && notes.isNotEmpty) 'notes': notes,
     });
 
@@ -88,7 +99,8 @@ class BookingService {
     return Booking.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
 
-  /// Rates a completed booking (1-5 stars, optional comment). The backend
+  /// Rates the overall service for a completed booking (1-5 stars,
+  /// optional comment) — a rating of the service, not of a provider. The backend
   /// rejects this if the booking isn't completed, isn't the caller's own,
   /// or has already been rated — surfaced as a [BookingServiceException].
   static Future<Booking> rateBooking({

@@ -4,14 +4,16 @@ import 'package:flutter/material.dart';
 import '../main.dart';
 import '../models/booking.dart';
 import '../models/provider_profile.dart';
+import '../models/service_rating.dart';
 import '../services/api_config.dart';
 import '../services/booking_service.dart';
 import '../services/provider_service.dart';
+import '../services/service_rating_service.dart';
 import '../widgets/profile_picture_picker.dart';
 import 'provider_booking_details_page.dart';
 import 'complete_profile.dart';
 import 'provider_bookings.dart';
-import 'role_selection.dart';
+import 'login.dart';
 
 class ServiceProviderHomePage extends StatefulWidget {
   final String providerName;
@@ -35,6 +37,20 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
   bool _loadingProfile = true;
   String? _profileError;
 
+  // Customers rate the overall service, not individual providers, so what a
+  // provider sees here is the overall rating of the service they offer.
+  List<ServiceRating> _serviceRatings = [];
+  bool _loadingServiceRatings = true;
+
+  ServiceRating? get _serviceRating {
+    final category = _profile?.serviceCategory;
+    if (category == null) return null;
+    for (final r in _serviceRatings) {
+      if (r.serviceCategory == category) return r;
+    }
+    return null;
+  }
+
   List<Booking> _allBookings = [];
   List<Booking> _pendingBookings = [];
   List<Booking> _acceptedBookings = [];
@@ -51,6 +67,23 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
     super.initState();
     _loadProfile();
     _loadBookings();
+    _loadServiceRatings();
+  }
+
+  Future<void> _loadServiceRatings() async {
+    try {
+      final ratings = await ServiceRatingService.getServiceRatings(widget.accessToken);
+      if (!mounted) return;
+      setState(() {
+        _serviceRatings = ratings;
+        _loadingServiceRatings = false;
+      });
+    } catch (_) {
+      // The rating is informational — if it can't load, the tile just shows
+      // a dash rather than an error banner.
+      if (!mounted) return;
+      setState(() => _loadingServiceRatings = false);
+    }
   }
 
   Future<void> _loadBookings() async {
@@ -232,11 +265,11 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                                     const Icon(Icons.star_rounded, size: 14, color: Colors.amber),
                                     const SizedBox(width: 2),
                                     Text(
-                                      _loadingProfile
+                                      _loadingProfile || _loadingServiceRatings
                                           ? 'Loading…'
-                                          : _profile != null
-                                          ? '${_profile!.rating.toStringAsFixed(1)} Rating (${_profile!.reviewsCount})'
-                                          : '— Rating',
+                                          : _serviceRating?.hasReviews == true
+                                          ? '${_serviceRating!.rating.toStringAsFixed(1)} Service rating (${_serviceRating!.reviewsCount})'
+                                          : '— Service rating',
                                       style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
                                     ),
                                   ],
@@ -377,7 +410,7 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
       // TODO: clear auth session before navigating back
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (_) => const RoleSelectionPage()),
+        MaterialPageRoute(builder: (_) => const LoginPage(role: UserRole.provider)),
             (route) => false,
       );
     }
@@ -399,21 +432,6 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                     IconButton(
                       onPressed: () {},
                       icon: const Icon(Icons.menu_rounded),
-                    ),
-                    Row(
-                      children: [
-                        Icon(Icons.home_repair_service_rounded, color: kAccentGreen, size: 22),
-                        const SizedBox(width: 4),
-                        RichText(
-                          text: const TextSpan(
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                            children: [
-                              TextSpan(text: 'Ghar', style: TextStyle(color: kDarkText)),
-                              TextSpan(text: 'Sewa', style: TextStyle(color: kAccentGreen)),
-                            ],
-                          ),
-                        ),
-                      ],
                     ),
                     IconButton(
                       onPressed: () {},
@@ -579,12 +597,12 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                       ),
                       _StatItem(
                         icon: Icons.star_outline_rounded,
-                        value: _loadingProfile
+                        value: _loadingProfile || _loadingServiceRatings
                             ? '…'
-                            : _profile != null
-                            ? _profile!.rating.toStringAsFixed(1)
+                            : _serviceRating?.hasReviews == true
+                            ? _serviceRating!.rating.toStringAsFixed(1)
                             : '—',
-                        label: 'Your Rating',
+                        label: 'Service Rating',
                       ),
                     ],
                   ),
@@ -638,9 +656,35 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(b.customerName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                                  if (b.serviceCategory != null) ...[
+                                  // The job requested and what it pays, so a
+                                  // provider can judge an incoming request
+                                  // before accepting it.
+                                  if (b.jobTitle != null || b.serviceCategory != null) ...[
                                     const SizedBox(height: 2),
-                                    Text(b.serviceCategory!, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                                    Row(
+                                      children: [
+                                        Flexible(
+                                          child: Text(
+                                            b.jobTitle != null && b.serviceCategory != null
+                                                ? '${b.jobTitle} · ${b.serviceCategory}'
+                                                : b.displayTitle,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                          ),
+                                        ),
+                                        if (b.hasPrice) ...[
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            b.priceLabel!,
+                                            style: const TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w700,
+                                                color: kPrimaryGreen),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
                                   ],
                                   const SizedBox(height: 6),
                                   Row(
@@ -766,9 +810,32 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                                         Text(b.customerName,
                                             style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                                         const SizedBox(height: 2),
-                                        if (b.serviceCategory != null)
-                                          Text(b.serviceCategory!,
-                                              style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                                        if (b.jobTitle != null || b.serviceCategory != null)
+                                          Row(
+                                            children: [
+                                              Flexible(
+                                                child: Text(
+                                                  b.jobTitle != null && b.serviceCategory != null
+                                                      ? '${b.jobTitle} · ${b.serviceCategory}'
+                                                      : b.displayTitle,
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: TextStyle(
+                                                      fontSize: 12, color: Colors.grey.shade600),
+                                                ),
+                                              ),
+                                              if (b.hasPrice) ...[
+                                                const SizedBox(width: 8),
+                                                Text(
+                                                  b.priceLabel!,
+                                                  style: const TextStyle(
+                                                      fontSize: 12,
+                                                      fontWeight: FontWeight.w700,
+                                                      color: kPrimaryGreen),
+                                                ),
+                                              ],
+                                            ],
+                                          ),
                                         const SizedBox(height: 2),
                                         Row(
                                           children: [

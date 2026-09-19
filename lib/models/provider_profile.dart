@@ -15,8 +15,6 @@ class ProviderProfile {
   final String? profilePictureUrl;
   final String verificationStatus;
   final bool availability;
-  final double rating;
-  final int reviewsCount;
 
   ProviderProfile({
     required this.id,
@@ -25,8 +23,6 @@ class ProviderProfile {
     required this.city,
     required this.verificationStatus,
     required this.availability,
-    required this.rating,
-    required this.reviewsCount,
     this.serviceCategory,
     this.experience,
     this.bio,
@@ -63,8 +59,6 @@ class ProviderProfile {
       city: city,
       verificationStatus: verificationStatus,
       availability: availability,
-      rating: rating,
-      reviewsCount: reviewsCount,
       serviceCategory: serviceCategory,
       experience: experience,
       bio: bio,
@@ -96,8 +90,6 @@ class ProviderProfile {
       profilePictureUrl: json['profile_picture_url'] as String?,
       verificationStatus: json['verification_status'] as String,
       availability: json['availability'] as bool,
-      rating: (json['rating'] as num).toDouble(),
-      reviewsCount: json['reviews_count'] as int,
     );
   }
 }

@@ -264,9 +264,35 @@ class _ProviderBookingsPageState extends State<ProviderBookingsPage> {
                                 Icon(Icons.chevron_right_rounded, size: 20, color: Colors.grey.shade400),
                               ],
                             ),
-                            if (b.serviceCategory != null) ...[
+                            // Job (or service) plus the price it was booked
+                            // at, so a provider can triage jobs by value as
+                            // well as by type.
+                            if (b.jobTitle != null || b.serviceCategory != null) ...[
                               const SizedBox(height: 2),
-                              Text(b.serviceCategory!, style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+                              Row(
+                                children: [
+                                  Flexible(
+                                    child: Text(
+                                      b.jobTitle != null && b.serviceCategory != null
+                                          ? '${b.jobTitle} · ${b.serviceCategory}'
+                                          : b.displayTitle,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                                    ),
+                                  ),
+                                  if (b.hasPrice) ...[
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      b.priceLabel!,
+                                      style: const TextStyle(
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: kPrimaryGreen),
+                                    ),
+                                  ],
+                                ],
+                              ),
                             ],
                             if (b.preferredDate != null) ...[
                               const SizedBox(height: 4),

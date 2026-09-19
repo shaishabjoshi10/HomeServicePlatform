@@ -162,7 +162,12 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
                     Row(
                       children: [
                         Expanded(
-                          child: Text(b.providerName,
+                          // The specific job where there is one ("Fan
+                          // Installation"), falling back to the service
+                          // category for older or category-level bookings.
+                          child: Text(b.displayTitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                               style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
                         ),
                         Container(
@@ -181,9 +186,44 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
                         Icon(Icons.chevron_right_rounded, size: 20, color: Colors.grey.shade400),
                       ],
                     ),
-                    if (b.serviceCategory != null) ...[
+                    // Service + agreed price, when the booking was made for a
+                    // specific job. The price is the one snapshotted at
+                    // booking time, not today's catalogue figure.
+                    if (b.jobTitle != null || b.hasPrice) ...[
+                      const SizedBox(height: 3),
+                      Row(
+                        children: [
+                          if (b.serviceCategory != null)
+                            Flexible(
+                              child: Text(
+                                b.serviceCategory!,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
+                              ),
+                            ),
+                          if (b.serviceCategory != null && b.hasPrice)
+                            Text(' · ', style: TextStyle(fontSize: 12.5, color: Colors.grey.shade400)),
+                          if (b.hasPrice)
+                            Text(
+                              b.priceLabel!,
+                              style: const TextStyle(
+                                  fontSize: 12.5, fontWeight: FontWeight.w700, color: kPrimaryGreen),
+                            ),
+                        ],
+                      ),
+                    ],
+                    // The title is the job or service (there's no provider
+                    // name to tell two bookings apart), so the problem
+                    // description gives each card its identifying detail.
+                    if (b.problemDescription != null && b.problemDescription!.isNotEmpty) ...[
                       const SizedBox(height: 2),
-                      Text(b.serviceCategory!, style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+                      Text(
+                        b.problemDescription!,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                      ),
                     ],
                     if (b.preferredDate != null) ...[
                       const SizedBox(height: 4),

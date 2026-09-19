@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../main.dart';
 import '../models/booking.dart';
+import '../models/service_job.dart';
 import '../services/booking_service.dart';
 import 'booking_timeline.dart';
 
@@ -36,7 +37,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('Cancel Booking'),
-        content: Text('Cancel your booking request with ${_booking.providerName}?'),
+        content: Text('Cancel your ${_booking.serviceCategory ?? 'service'} booking request?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
@@ -72,7 +73,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   Future<void> _rateBooking() async {
     final result = await showDialog<_RatingResult>(
       context: context,
-      builder: (dialogContext) => _RatingDialog(providerName: _booking.providerName),
+      builder: (dialogContext) => _RatingDialog(serviceName: _booking.serviceCategory),
     );
 
     if (result == null) return;
@@ -157,8 +158,21 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
             Row(
               children: [
                 Expanded(
-                  child: Text(b.providerName,
-                      style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 18, color: kDarkText)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(b.displayTitle,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w700, fontSize: 18, color: kDarkText)),
+                      // The service category, once the headline is the
+                      // specific job rather than the category itself.
+                      if (b.jobTitle != null && b.serviceCategory != null) ...[
+                        const SizedBox(height: 2),
+                        Text(b.serviceCategory!,
+                            style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+                      ],
+                    ],
+                  ),
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -173,10 +187,6 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 ),
               ],
             ),
-            if (b.serviceCategory != null) ...[
-              const SizedBox(height: 4),
-              Text(b.serviceCategory!, style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
-            ],
             if (b.status != 'rejected' && b.status != 'cancelled') ...[
               const SizedBox(height: 20),
               Container(
@@ -190,6 +200,17 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
               ),
             ],
             const SizedBox(height: 20),
+            // The price agreed when this booking was placed. It's a snapshot
+            // taken server-side, so it keeps showing what the customer
+            // actually booked at even if the job is repriced later.
+            if (b.hasPrice)
+              _DetailRow(
+                icon: Icons.payments_outlined,
+                label: b.priceType == PriceType.startingFrom ? 'Price (starting from)' : 'Price',
+                value: b.priceType == PriceType.startingFrom
+                    ? '${b.priceLabel!} · final price depends on the work needed'
+                    : b.priceLabel!,
+              ),
             _DetailRow(icon: Icons.location_on_outlined, label: 'Address', value: b.address),
             if (b.preferredDate != null)
               _DetailRow(
@@ -249,7 +270,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Text('You rated this ${b.ratingStars}/5',
+                  Text('You rated this service ${b.ratingStars}/5',
                       style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
                 ],
               ),
@@ -305,8 +326,10 @@ class _RatingResult {
 }
 
 class _RatingDialog extends StatefulWidget {
-  final String providerName;
-  const _RatingDialog({required this.providerName});
+  /// The service being rated (e.g. "Plumbing") — the rating is for the
+  /// overall service, never for an individual provider.
+  final String? serviceName;
+  const _RatingDialog({required this.serviceName});
 
   @override
   State<_RatingDialog> createState() => _RatingDialogState();
@@ -325,7 +348,7 @@ class _RatingDialogState extends State<_RatingDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('Rate ${widget.providerName}'),
+      title: Text(widget.serviceName != null ? 'Rate ${widget.serviceName} service' : 'Rate this service'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -4,15 +4,17 @@ import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../main.dart';
-import '../models/provider_profile.dart';
+import '../models/service_job.dart';
+import '../models/service_rating.dart';
 import '../services/api_config.dart';
 import '../services/booking_service.dart';
 import '../services/profile_service.dart';
-import '../services/provider_service.dart';
+import '../services/service_catalog_service.dart';
+import '../services/service_rating_service.dart';
 import '../widgets/profile_picture_picker.dart';
 import 'location_picker.dart';
 import 'my_bookings.dart';
-import 'role_selection.dart';
+import 'login.dart';
 
 class _Category {
   final String name;
@@ -20,10 +22,13 @@ class _Category {
   const _Category(this.name, this.icon);
 }
 
-class _ServiceJob {
-  final String name;
-  final String description;
-  const _ServiceJob(this.name, this.description);
+/// One hit in the home-screen search: either a whole service (job == null)
+/// or a specific job under a service, which goes straight to that job's
+/// booking sheet.
+class _ServiceSearchResult {
+  final String category;
+  final ServiceJob? job;
+  const _ServiceSearchResult(this.category, [this.job]);
 }
 
 class CustomerHomePage extends StatefulWidget {
@@ -47,157 +52,77 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
   static const int _profileTabIndex = 3;
 
   final _searchController = TextEditingController();
-  List<ProviderProfile> _searchResults = [];
+  List<_ServiceSearchResult> _searchResults = [];
   bool get _isSearching => _searchController.text.trim().isNotEmpty;
 
   final _categories = const [
+    _Category('Electrical', Icons.lightbulb_outline_rounded),
     _Category('Cleaning', Icons.cleaning_services_outlined),
     _Category('Plumbing', Icons.plumbing_outlined),
-    _Category('Electrical', Icons.lightbulb_outline_rounded),
-    _Category('Carpentry', Icons.handyman_outlined),
     _Category('Painting', Icons.format_paint_outlined),
     _Category('Appliance Repair', Icons.local_laundry_service_outlined),
+    _Category('Carpentry', Icons.handyman_outlined),
+    _Category('Laundry', Icons.dry_cleaning_outlined),
     _Category('Pest Control', Icons.pest_control_outlined),
-    _Category('More', Icons.more_horiz_rounded),
   ];
 
-  // 2–3 specific jobs shown when a customer taps a main service category,
-  // before they get to the booking form. Keyed by category name (must match
-  // `_categories` above and `ProviderProfile.serviceCategory` values).
-  static const Map<String, List<_ServiceJob>> _categoryJobs = {
-    'Cleaning': [
-      _ServiceJob(
-        'Deep House Cleaning',
-        'A thorough top-to-bottom clean covering floors, windows, kitchen surfaces, and bathrooms — ideal before a festival, move-in, or move-out.',
-      ),
-      _ServiceJob(
-        'Bathroom & Kitchen Cleaning',
-        'Focused scrubbing and sanitizing of tiles, sinks, and stovetops to cut through built-up grease and grime.',
-      ),
-      _ServiceJob(
-        'Sofa & Carpet Cleaning',
-        'Steam or shampoo cleaning for sofas, carpets, and rugs to lift dust, stains, and odours.',
-      ),
-    ],
-    'Plumbing': [
-      _ServiceJob(
-        'Leak & Pipe Repair',
-        'Fixing leaking taps, pipes, and joints to stop water wastage and prevent damage to walls and floors.',
-      ),
-      _ServiceJob(
-        'Tap & Fixture Installation',
-        'Installing or replacing taps, showers, and wash-basin fittings.',
-      ),
-      _ServiceJob(
-        'Water Tank Cleaning',
-        'Draining, scrubbing, and sanitizing overhead or underground water tanks.',
-      ),
-    ],
-    'Electrical': [
-      _ServiceJob(
-        'Switchboard & Socket Repair',
-        'Fixing faulty switches, sockets, and switchboards, including sparking or tripping issues.',
-      ),
-      _ServiceJob(
-        'Wiring & Rewiring',
-        'Inspecting and replacing old or unsafe household wiring.',
-      ),
-      _ServiceJob(
-        'Fan & Light Installation',
-        'Installing or repairing ceiling fans, tube lights, and other light fixtures.',
-      ),
-    ],
-    'Carpentry': [
-      _ServiceJob(
-        'Furniture Repair',
-        'Fixing broken chairs, tables, cupboards, and other wooden furniture.',
-      ),
-      _ServiceJob(
-        'Door & Window Fitting',
-        'Repairing or installing doors, windows, hinges, and locks that stick or don\'t close properly.',
-      ),
-      _ServiceJob(
-        'Custom Furniture Assembly',
-        'Assembling flat-pack or made-to-order furniture at your home.',
-      ),
-    ],
-    'Painting': [
-      _ServiceJob(
-        'Interior Wall Painting',
-        'Full or touch-up painting for bedrooms, living rooms, and ceilings.',
-      ),
-      _ServiceJob(
-        'Exterior Wall Painting',
-        'Weatherproof painting for outside walls and boundary walls.',
-      ),
-      _ServiceJob(
-        'Waterproofing & Wall Repair',
-        'Treating damp patches, cracks, and seepage before repainting.',
-      ),
-    ],
-    'Appliance Repair': [
-      _ServiceJob(
-        'Washing Machine Repair',
-        'Diagnosing and fixing drainage, spinning, or power issues.',
-      ),
-      _ServiceJob(
-        'Refrigerator Repair',
-        'Fixing cooling problems, unusual noise, or leaks.',
-      ),
-      _ServiceJob(
-        'Microwave & Oven Repair',
-        'Repairing heating and control issues on microwaves and ovens.',
-      ),
-    ],
-    'Pest Control': [
-      _ServiceJob(
-        'General Pest Control',
-        'Treatment for common household pests like cockroaches and ants.',
-      ),
-      _ServiceJob(
-        'Termite Treatment',
-        'Targeted treatment for termite infestations in wooden furniture and structures.',
-      ),
-      _ServiceJob(
-        'Rodent Control',
-        'Safe trapping and prevention measures for mice and rats.',
-      ),
-    ],
-  };
+  // The priced service catalogue: every service, the specific jobs under
+  // it, and what each job costs. Loaded from GET /api/services/catalog so
+  // prices always come from the server; the local fallback below is only
+  // used if that request fails, and never decides what a booking is
+  // actually charged (the server prices the booking from its own copy).
+  List<ServiceCatalogEntry> _catalog = ServiceCatalogService.fallbackCatalog;
 
-  List<ProviderProfile> _professionals = [];
-  bool _loadingProfessionals = true;
-  String? _professionalsError;
+  // Every bookable service, in the catalogue's own order.
+  List<String> get _serviceNames => _catalog.map((e) => e.serviceCategory).toList();
+
+  ServiceCatalogEntry? _entryFor(String categoryName) {
+    for (final entry in _catalog) {
+      if (entry.serviceCategory == categoryName) return entry;
+    }
+    return null;
+  }
+
+  /// The specific jobs under a service, each with its own price.
+  List<ServiceJob> _jobsFor(String categoryName) =>
+      _entryFor(categoryName)?.jobs ?? const <ServiceJob>[];
+
+  // Overall rating of each service — a rating of the service as a whole,
+  // never of an individual provider. Empty until loaded (or if loading
+  // fails), in which case the rating line is simply not shown.
+  List<ServiceRating> _serviceRatings = [];
 
   PickedLocation? _defaultLocation;
   String? _profilePictureUrl;
 
-  Future<void> _loadProfessionals() async {
-    setState(() {
-      _loadingProfessionals = true;
-      _professionalsError = null;
-    });
+  Future<void> _loadServices() async {
+    // getCatalogOrFallback() never throws — it falls back to a local copy
+    // itself, so the services list always renders.
+    final catalog = await ServiceCatalogService.getCatalogOrFallback(widget.accessToken);
+    if (mounted && catalog.isNotEmpty) setState(() => _catalog = catalog);
 
     try {
-      final providers = await ProviderService.listProviders(verifiedOnly: false);
+      final ratings = await ServiceRatingService.getServiceRatings(widget.accessToken);
       if (!mounted) return;
-      setState(() {
-        _professionals = providers;
-        _loadingProfessionals = false;
-      });
-    } on ProviderServiceException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _professionalsError = e.message;
-        _loadingProfessionals = false;
-      });
+      setState(() => _serviceRatings = ratings);
     } catch (_) {
-      if (!mounted) return;
-      setState(() {
-        _professionalsError = 'Something went wrong loading service providers.';
-        _loadingProfessionals = false;
-      });
+      // Ratings are informational: if they can't load, services still work,
+      // they just don't show a rating line.
     }
+  }
+
+  ServiceRating? _ratingFor(String categoryName) {
+    for (final r in _serviceRatings) {
+      if (r.serviceCategory == categoryName) return r;
+    }
+    return null;
+  }
+
+  IconData _iconFor(String categoryName) {
+    for (final c in _categories) {
+      if (c.name == categoryName) return c.icon;
+    }
+    return Icons.home_repair_service_outlined;
   }
 
   Future<void> _loadDefaultLocation() async {
@@ -275,122 +200,11 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
     }
   }
 
-  Widget _buildProfessionalsList() {
-    if (_loadingProfessionals) {
-      return const Center(
-        child: SizedBox(
-          height: 24,
-          width: 24,
-          child: CircularProgressIndicator(strokeWidth: 2, color: kPrimaryGreen),
-        ),
-      );
-    }
-
-    if (_professionalsError != null) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                _professionalsError!,
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-              ),
-              const SizedBox(height: 6),
-              TextButton(
-                onPressed: _loadProfessionals,
-                style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
-                child: const Text('Retry', style: TextStyle(color: kPrimaryGreen, fontWeight: FontWeight.w600)),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    if (_professionals.isEmpty) {
-      return Center(
-        child: Text(
-          'No service providers yet.',
-          style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-        ),
-      );
-    }
-
-    return ListView.separated(
-      padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
-      scrollDirection: Axis.horizontal,
-      itemCount: _professionals.length,
-      separatorBuilder: (_, _) => const SizedBox(width: 12),
-      itemBuilder: (context, index) {
-        final p = _professionals[index];
-        return InkWell(
-          borderRadius: BorderRadius.circular(16),
-          onTap: () => _openBookingForm(p),
-          child: Container(
-            width: 150,
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey.shade200),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                CircleAvatar(
-                  radius: 20,
-                  backgroundColor: kLightGreenBg,
-                  backgroundImage: p.profilePictureUrl != null
-                      ? NetworkImage('$apiBaseUrl${p.profilePictureUrl}')
-                      : null,
-                  child: p.profilePictureUrl == null
-                      ? const Icon(Icons.person_rounded, color: kPrimaryGreen)
-                      : null,
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  p.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
-                ),
-                Text(
-                  p.displayRole,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    const Icon(Icons.star_rounded, size: 14, color: Colors.amber),
-                    const SizedBox(width: 2),
-                    Expanded(
-                      child: Text(
-                        '${p.rating.toStringAsFixed(1)} (${p.reviewsCount})',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 11),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   @override
   void initState() {
     super.initState();
     _searchController.addListener(_onSearchChanged);
-    _loadProfessionals();
+    _loadServices();
     _loadDefaultLocation();
   }
 
@@ -407,101 +221,71 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
       if (query.isEmpty) {
         _searchResults = [];
       } else {
-        _searchResults = _professionals.where((p) {
-          return p.name.toLowerCase().contains(query) ||
-              p.displayRole.toLowerCase().contains(query);
-        }).toList();
+        // Searches services and their jobs — never people.
+        final results = <_ServiceSearchResult>[];
+        for (final category in _serviceNames) {
+          if (category.toLowerCase().contains(query)) {
+            results.add(_ServiceSearchResult(category));
+          }
+          for (final job in _jobsFor(category)) {
+            if (job.name.toLowerCase().contains(query) ||
+                job.description.toLowerCase().contains(query)) {
+              results.add(_ServiceSearchResult(category, job));
+            }
+          }
+        }
+        _searchResults = results;
       }
     });
   }
 
-  void _openCategoryResults(String categoryName) {
-    // "More" isn't a real category — it opens the full, filterable service
-    // list (same page as the "View All" link) instead of a dead tap.
-    if (categoryName == 'More') {
-      _openAllServices();
+  /// Tapping a service shows the specific jobs under it first, by name
+  /// only; picking a job opens the booking form, which is where its
+  /// description and price are shown. The customer never chooses a provider
+  /// — the server assigns one when the booking is created.
+  void _openService(String categoryName) {
+    final jobs = _jobsFor(categoryName);
+
+    // A service with no listed jobs goes straight to booking.
+    if (jobs.isEmpty) {
+      _openBookingForm(serviceCategory: categoryName);
       return;
     }
-    // Tapping a main category now shows the 2–3 specific jobs under it
-    // first, rather than dropping straight into a provider list.
-    final providers = _professionals.where((p) => p.serviceCategory == categoryName).toList();
-    final jobs = _categoryJobs[categoryName] ?? const <_ServiceJob>[];
+
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => _ServiceJobsPage(
           categoryName: categoryName,
           jobs: jobs,
-          providers: providers,
-          onSelectJob: (job) => _openJobDetail(categoryName, job, providers),
-          onBook: _openBookingForm,
+          icon: _iconFor(categoryName),
+          rating: _ratingFor(categoryName),
+          onSelectJob: (job) => _openBookingForm(serviceCategory: categoryName, job: job),
         ),
       ),
     );
-  }
-
-  void _openJobDetail(String categoryName, _ServiceJob job, List<ProviderProfile> providers) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => _ServiceJobDetailPage(
-          categoryName: categoryName,
-          job: job,
-          onBookService: () => _matchProviderAndBookService(categoryName, job, providers),
-        ),
-      ),
-    );
-  }
-
-  /// Picks a provider for the tapped job (preferring an available one, then
-  /// highest rating, then most reviews) and opens the existing booking form
-  /// for them. Booking still always requires a specific provider_id
-  /// server-side, so this is a lightweight auto-match rather than a manual
-  /// pick — the customer can still browse and choose a specific professional
-  /// instead via the "Browse professionals" link on the jobs page.
-  Future<void> _matchProviderAndBookService(
-    String categoryName,
-    _ServiceJob job,
-    List<ProviderProfile> providers,
-  ) async {
-    if (providers.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('No professionals currently offer $categoryName services. Please check back soon.'),
-          backgroundColor: Colors.red.shade600,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return;
-    }
-    final ranked = [...providers]..sort((a, b) {
-      if (a.availability != b.availability) return a.availability ? -1 : 1;
-      final byRating = b.rating.compareTo(a.rating);
-      if (byRating != 0) return byRating;
-      return b.reviewsCount.compareTo(a.reviewsCount);
-    });
-    await _openBookingForm(ranked.first, jobTitle: job.name);
   }
 
   void _openAllServices() {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => _AllServicesPage(providers: _professionals, onBook: _openBookingForm),
+        builder: (_) => _AllServicesPage(
+          services: _serviceNames,
+          iconFor: _iconFor,
+          ratingFor: _ratingFor,
+          onSelect: _openService,
+        ),
       ),
     );
   }
 
-  void _openAllProfessionals() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => _AllProfessionalsPage(professionals: _professionals, onBook: _openBookingForm),
-      ),
-    );
-  }
-
-  Future<void> _openBookingForm(ProviderProfile provider, {String? jobTitle}) async {
+  /// [job] is the specific job being booked, where the customer picked one
+  /// — its price is shown in the form and its name is sent with the
+  /// booking. The price itself is never sent: the server prices the booking
+  /// from its own catalogue.
+  Future<void> _openBookingForm({required String serviceCategory, ServiceJob? job}) async {
+    final jobTitle = job?.name;
     final pageContext = context; // survives after the sheet closes
     final problemDescriptionController = TextEditingController();
     final notesController = TextEditingController();
@@ -567,15 +351,69 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                           ),
                         ),
                       ),
-                      Text(jobTitle ?? 'Book ${provider.name}',
-                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: kDarkText)),
-                      const SizedBox(height: 2),
-                      Text(
-                        jobTitle != null
-                            ? 'Matched with ${provider.name} • ${provider.displayRole}'
-                            : provider.displayRole,
-                        style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                      _ServiceHeroImage(
+                        categoryName: serviceCategory,
+                        icon: _iconFor(serviceCategory),
+                        height: 120,
                       ),
+                      const SizedBox(height: 16),
+                      Text(jobTitle ?? serviceCategory,
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: kDarkText)),
+                      if (jobTitle != null) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          serviceCategory,
+                          style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                        ),
+                      ],
+                      // What the job involves and what it costs. This is the
+                      // first place either appears: the services list shows
+                      // only job names, so the customer gets the detail here,
+                      // once they've picked one, and confirms the price as
+                      // part of booking rather than discovering it later.
+                      // Shown only when a specific job was picked — a
+                      // category on its own has neither.
+                      if (job != null) ...[
+                        if (job.description.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          Text(
+                            job.description,
+                            style: TextStyle(fontSize: 13, height: 1.4, color: Colors.grey.shade700),
+                          ),
+                        ],
+                        const SizedBox(height: 14),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: kLightGreenBg,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.payments_outlined, size: 20, color: kPrimaryGreen),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      job.priceLabel,
+                                      style: const TextStyle(
+                                          fontSize: 17, fontWeight: FontWeight.w700, color: kDarkText),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      job.priceNote,
+                                      style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 20),
                       const Text('Address *',
                           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: kDarkText)),
@@ -895,11 +733,11 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                             try {
                               await BookingService.createBooking(
                                 accessToken: widget.accessToken,
-                                providerId: provider.userId,
                                 address: pickedLocation!.address,
                                 latitude: pickedLocation!.latitude,
                                 longitude: pickedLocation!.longitude,
-                                serviceCategory: provider.serviceCategory,
+                                serviceCategory: serviceCategory,
+                                jobTitle: jobTitle,
                                 problemDescription: problemDescriptionController.text.trim(),
                                 notes: notesController.text.trim().isEmpty ? null : notesController.text.trim(),
                                 preferredDate: combinedDateTime,
@@ -1107,7 +945,7 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
       // TODO: clear auth session before navigating back
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (_) => const RoleSelectionPage()),
+        MaterialPageRoute(builder: (_) => const LoginPage(role: UserRole.customer)),
             (route) => false,
       );
     }
@@ -1145,21 +983,6 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                           const Icon(Icons.keyboard_arrow_down_rounded, size: 16),
                         ],
                       ),
-                    ),
-                    Row(
-                      children: [
-                        Icon(Icons.home_repair_service_rounded, color: kAccentGreen, size: 22),
-                        const SizedBox(width: 4),
-                        RichText(
-                          text: const TextSpan(
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                            children: [
-                              TextSpan(text: 'Ghar', style: TextStyle(color: kDarkText)),
-                              TextSpan(text: 'Sewa', style: TextStyle(color: kAccentGreen)),
-                            ],
-                          ),
-                        ),
-                      ],
                     ),
                     Stack(
                       clipBehavior: Clip.none,
@@ -1261,7 +1084,7 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                       children: [
                         Icon(Icons.search_off_rounded, size: 40, color: Colors.grey.shade400),
                         const SizedBox(height: 8),
-                        Text('No service providers match your search',
+                        Text('No services match your search',
                             style: TextStyle(color: Colors.grey.shade600)),
                       ],
                     ),
@@ -1274,9 +1097,19 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                     delegate: SliverChildBuilderDelegate(
                           (context, index) => Padding(
                         padding: const EdgeInsets.only(bottom: 12),
-                        child: _ProviderListTile(
-                          provider: _searchResults[index],
-                          onTap: () => _openBookingForm(_searchResults[index]),
+                        child: _ServiceListTile(
+                          title: _searchResults[index].job?.name ?? _searchResults[index].category,
+                          subtitle: _searchResults[index].job != null ? _searchResults[index].category : null,
+                          icon: _iconFor(_searchResults[index].category),
+                          rating: _ratingFor(_searchResults[index].category),
+                          onTap: () {
+                            final result = _searchResults[index];
+                            if (result.job != null) {
+                              _openBookingForm(serviceCategory: result.category, job: result.job);
+                            } else {
+                              _openService(result.category);
+                            }
+                          },
                         ),
                       ),
                       childCount: _searchResults.length,
@@ -1317,36 +1150,10 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                   delegate: SliverChildBuilderDelegate(
                         (context, index) => _CategoryTile(
                       category: _categories[index],
-                      onTap: () => _openCategoryResults(_categories[index].name),
+                      onTap: () => _openService(_categories[index].name),
                     ),
                     childCount: _categories.length,
                   ),
-                ),
-              ),
-
-              // Top rated professionals
-              SliverPadding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                sliver: SliverToBoxAdapter(
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('Top Rated Professionals',
-                          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: kDarkText)),
-                      TextButton(
-                        onPressed: _openAllProfessionals,
-                        style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
-                        child: const Text('View All',
-                            style: TextStyle(color: kPrimaryGreen, fontWeight: FontWeight.w600)),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              SliverToBoxAdapter(
-                child: SizedBox(
-                  height: 176,
-                  child: _buildProfessionalsList(),
                 ),
               ),
             ],
@@ -1447,13 +1254,22 @@ class _CategoryTile extends StatelessWidget {
   }
 }
 
-// Shared row-style card for a real ProviderProfile — used by search
-// results, category results, and the "All Services" page.
-class _ProviderListTile extends StatelessWidget {
-  final ProviderProfile provider;
+// Shared row-style card for a service — used by search results and the
+// "All Services" page. Shows the service's overall rating, never a provider.
+class _ServiceListTile extends StatelessWidget {
+  final String title;
+  final String? subtitle;
+  final IconData icon;
+  final ServiceRating? rating;
   final VoidCallback onTap;
 
-  const _ProviderListTile({required this.provider, required this.onTap});
+  const _ServiceListTile({
+    required this.title,
+    required this.icon,
+    required this.onTap,
+    this.subtitle,
+    this.rating,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1468,15 +1284,11 @@ class _ProviderListTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            CircleAvatar(
-              radius: 26,
-              backgroundColor: kLightGreenBg,
-              backgroundImage: provider.profilePictureUrl != null
-                  ? NetworkImage('$apiBaseUrl${provider.profilePictureUrl}')
-                  : null,
-              child: provider.profilePictureUrl == null
-                  ? const Icon(Icons.person_rounded, color: kPrimaryGreen)
-                  : null,
+            Container(
+              width: 52,
+              height: 52,
+              decoration: const BoxDecoration(color: kLightGreenBg, shape: BoxShape.circle),
+              child: Icon(icon, color: kPrimaryGreen),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -1484,29 +1296,24 @@ class _ProviderListTile extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    provider.name,
+                    title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
                   ),
-                  const SizedBox(height: 2),
-                  Text(
-                    provider.displayRole,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      const Icon(Icons.star_rounded, size: 15, color: Colors.amber),
-                      const SizedBox(width: 3),
-                      Text(
-                        '${provider.rating.toStringAsFixed(1)} (${provider.reviewsCount} reviews)',
-                        style: const TextStyle(fontSize: 12),
-                      ),
-                    ],
-                  ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                    ),
+                  ],
+                  if (rating != null) ...[
+                    const SizedBox(height: 4),
+                    _ServiceRatingLine(rating: rating!),
+                  ],
                 ],
               ),
             ),
@@ -1518,20 +1325,93 @@ class _ProviderListTile extends StatelessWidget {
   }
 }
 
+/// Banner photo for a service, loaded from `assets/services/<service>.jpg`
+/// (e.g. Cleaning -> cleaning.jpg, Appliance Repair -> appliance_repair.jpg,
+/// Pest Control -> pest_control.jpg). If a photo is missing, it falls
+/// back to a plain tile with the service's icon instead of breaking the page.
+class _ServiceHeroImage extends StatelessWidget {
+  final String categoryName;
+  final IconData icon;
+  final double height;
+
+  const _ServiceHeroImage({
+    required this.categoryName,
+    required this.icon,
+    this.height = 160,
+  });
+
+  static String pathFor(String categoryName) {
+    final slug = categoryName
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    return 'assets/services/$slug.jpg';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final fallback = Container(
+      color: kLightGreenBg,
+      alignment: Alignment.center,
+      child: Icon(icon, size: 48, color: kPrimaryGreen),
+    );
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(16),
+      child: SizedBox(
+        width: double.infinity,
+        height: height,
+        child: Image.asset(
+          pathFor(categoryName),
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => fallback,
+        ),
+      ),
+    );
+  }
+}
+
+/// "★ 4.6 (23 reviews)" for a rated service, a greyed "No ratings yet" otherwise.
+class _ServiceRatingLine extends StatelessWidget {
+  final ServiceRating rating;
+  const _ServiceRatingLine({required this.rating});
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          rating.hasReviews ? Icons.star_rounded : Icons.star_border_rounded,
+          size: 15,
+          color: rating.hasReviews ? Colors.amber : Colors.grey.shade400,
+        ),
+        const SizedBox(width: 3),
+        Text(
+          rating.label,
+          style: TextStyle(
+            fontSize: 12,
+            color: rating.hasReviews ? null : Colors.grey.shade600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 // ── Category tap → 2–3 specific jobs under that category ──
 class _ServiceJobsPage extends StatelessWidget {
   final String categoryName;
-  final List<_ServiceJob> jobs;
-  final List<ProviderProfile> providers;
-  final ValueChanged<_ServiceJob> onSelectJob;
-  final ValueChanged<ProviderProfile> onBook;
+  final List<ServiceJob> jobs;
+  final IconData icon;
+  final ServiceRating? rating;
+  final ValueChanged<ServiceJob> onSelectJob;
 
   const _ServiceJobsPage({
     required this.categoryName,
     required this.jobs,
-    required this.providers,
+    required this.icon,
     required this.onSelectJob,
-    required this.onBook,
+    this.rating,
   });
 
   @override
@@ -1547,6 +1427,17 @@ class _ServiceJobsPage extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
+          _ServiceHeroImage(categoryName: categoryName, icon: icon),
+          const SizedBox(height: 16),
+          if (rating != null) ...[
+            Text(
+              'Overall service rating',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 4),
+            _ServiceRatingLine(rating: rating!),
+            const SizedBox(height: 20),
+          ],
           const Text(
             'What do you need help with?',
             style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: kDarkText),
@@ -1567,7 +1458,7 @@ class _ServiceJobsPage extends StatelessWidget {
             )
           else
             ...jobs.map(
-              (job) => Padding(
+                  (job) => Padding(
                 padding: const EdgeInsets.only(bottom: 12),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(16),
@@ -1578,6 +1469,9 @@ class _ServiceJobsPage extends StatelessWidget {
                       border: Border.all(color: Colors.grey.shade200),
                       borderRadius: BorderRadius.circular(16),
                     ),
+                    // Just the job's name here — what it involves and what
+                    // it costs are shown once the customer taps through to
+                    // the booking sheet, so this list stays scannable.
                     child: Row(
                       children: [
                         Container(
@@ -1588,19 +1482,8 @@ class _ServiceJobsPage extends StatelessWidget {
                         ),
                         const SizedBox(width: 14),
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(job.name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                              const SizedBox(height: 4),
-                              Text(
-                                job.description,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
-                              ),
-                            ],
-                          ),
+                          child: Text(job.name,
+                              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                         ),
                         Icon(Icons.chevron_right_rounded, color: Colors.grey.shade400),
                       ],
@@ -1609,165 +1492,28 @@ class _ServiceJobsPage extends StatelessWidget {
                 ),
               ),
             ),
-          const SizedBox(height: 8),
-          Center(
-            child: TextButton.icon(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => _CategoryResultsPage(
-                      categoryName: categoryName,
-                      providers: providers,
-                      onBook: onBook,
-                    ),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.people_outline_rounded, color: kPrimaryGreen),
-              label: const Text('Browse professionals in this category', style: TextStyle(color: kPrimaryGreen)),
-            ),
-          ),
         ],
       ),
     );
   }
 }
 
-// ── Job tap → its description and a "Book Service" button ──
-class _ServiceJobDetailPage extends StatelessWidget {
-  final String categoryName;
-  final _ServiceJob job;
-  final Future<void> Function() onBookService;
+// ── "View All" / "More" → every service, each with its overall rating ──
+class _AllServicesPage extends StatelessWidget {
+  final List<String> services;
+  final IconData Function(String categoryName) iconFor;
+  final ServiceRating? Function(String categoryName) ratingFor;
+  final ValueChanged<String> onSelect;
 
-  const _ServiceJobDetailPage({
-    required this.categoryName,
-    required this.job,
-    required this.onBookService,
+  const _AllServicesPage({
+    required this.services,
+    required this.iconFor,
+    required this.ratingFor,
+    required this.onSelect,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        title: Text(categoryName),
-        backgroundColor: Colors.white,
-        foregroundColor: kDarkText,
-        elevation: 0,
-      ),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 56,
-                height: 56,
-                decoration: const BoxDecoration(color: kLightGreenBg, shape: BoxShape.circle),
-                child: const Icon(Icons.build_outlined, color: kPrimaryGreen, size: 28),
-              ),
-              const SizedBox(height: 16),
-              Text(job.name, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: kDarkText)),
-              const SizedBox(height: 4),
-              Text(categoryName, style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
-              const SizedBox(height: 16),
-              Text(
-                job.description,
-                style: TextStyle(fontSize: 14, height: 1.5, color: Colors.grey.shade800),
-              ),
-              const Spacer(),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  style: FilledButton.styleFrom(
-                    backgroundColor: kPrimaryGreen,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  ),
-                  onPressed: () => onBookService(),
-                  child: const Text('Book Service', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CategoryResultsPage extends StatelessWidget {
-  final String categoryName;
-  final List<ProviderProfile> providers;
-  final ValueChanged<ProviderProfile> onBook;
-
-  const _CategoryResultsPage({
-    required this.categoryName,
-    required this.providers,
-    required this.onBook,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(categoryName),
-        backgroundColor: Colors.white,
-        foregroundColor: kDarkText,
-        elevation: 0,
-      ),
-      body: providers.isEmpty
-          ? Center(
-        child: Text('No service providers available in $categoryName yet',
-            style: TextStyle(color: Colors.grey.shade600)),
-      )
-          : ListView.separated(
-        padding: const EdgeInsets.all(20),
-        itemCount: providers.length,
-        separatorBuilder: (_, _) => const SizedBox(height: 12),
-        itemBuilder: (context, index) {
-          final provider = providers[index];
-          return _ProviderListTile(
-            provider: provider,
-            onTap: () => onBook(provider),
-          );
-        },
-      ),
-    );
-  }
-}
-
-// ── "View All" → Popular Services (all providers, grouped by category) ──
-class _AllServicesPage extends StatefulWidget {
-  final List<ProviderProfile> providers;
-  final ValueChanged<ProviderProfile> onBook;
-
-  const _AllServicesPage({required this.providers, required this.onBook});
-
-  @override
-  State<_AllServicesPage> createState() => _AllServicesPageState();
-}
-
-class _AllServicesPageState extends State<_AllServicesPage> {
-  String _selectedFilter = 'All';
-
-  List<String> get _filters {
-    final categories = widget.providers
-        .map((p) => p.serviceCategory)
-        .whereType<String>()
-        .toSet()
-        .toList();
-    return ['All', ...categories];
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final filtered = _selectedFilter == 'All'
-        ? widget.providers
-        : widget.providers.where((p) => p.serviceCategory == _selectedFilter).toList();
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('All Services'),
@@ -1775,165 +1521,24 @@ class _AllServicesPageState extends State<_AllServicesPage> {
         foregroundColor: kDarkText,
         elevation: 0,
       ),
-      body: Column(
-        children: [
-          SizedBox(
-            height: 44,
-            child: ListView.separated(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-              scrollDirection: Axis.horizontal,
-              itemCount: _filters.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 8),
-              itemBuilder: (context, index) {
-                final filter = _filters[index];
-                final isSelected = filter == _selectedFilter;
-                return ChoiceChip(
-                  label: Text(filter),
-                  selected: isSelected,
-                  onSelected: (_) => setState(() => _selectedFilter = filter),
-                  selectedColor: kLightGreenBg,
-                  labelStyle: TextStyle(
-                    color: isSelected ? kPrimaryGreen : Colors.grey.shade700,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-                    fontSize: 13,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(20),
-                    side: BorderSide(color: isSelected ? kPrimaryGreen : Colors.grey.shade300),
-                  ),
-                  backgroundColor: Colors.white,
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 4),
-          Expanded(
-            child: filtered.isEmpty
-                ? Center(
-              child: Text(
-                'No service providers yet.',
-                style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
-              ),
-            )
-                : ListView.separated(
-              padding: const EdgeInsets.all(20),
-              itemCount: filtered.length,
-              separatorBuilder: (_, _) => const SizedBox(height: 12),
-              itemBuilder: (context, index) {
-                final provider = filtered[index];
-                return _ProviderListTile(
-                  provider: provider,
-                  onTap: () => widget.onBook(provider),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── "View All" → Top Rated Professionals ──
-class _AllProfessionalsPage extends StatelessWidget {
-  final List<ProviderProfile> professionals;
-  final ValueChanged<ProviderProfile> onBook;
-
-  const _AllProfessionalsPage({required this.professionals, required this.onBook});
-
-  @override
-  Widget build(BuildContext context) {
-    final sorted = [...professionals]..sort((a, b) => b.rating.compareTo(a.rating));
-
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Top Rated Professionals'),
-        backgroundColor: Colors.white,
-        foregroundColor: kDarkText,
-        elevation: 0,
-      ),
-      body: sorted.isEmpty
+      body: services.isEmpty
           ? Center(
         child: Text(
-          'No service providers yet.',
+          'No services available yet.',
           style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
         ),
       )
           : ListView.separated(
         padding: const EdgeInsets.all(20),
-        itemCount: sorted.length,
+        itemCount: services.length,
         separatorBuilder: (_, _) => const SizedBox(height: 12),
         itemBuilder: (context, index) {
-          final p = sorted[index];
-          return Material(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            child: InkWell(
-              borderRadius: BorderRadius.circular(16),
-              onTap: () => onBook(p),
-              child: Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade200),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 26,
-                      backgroundColor: kLightGreenBg,
-                      backgroundImage: p.profilePictureUrl != null
-                          ? NetworkImage('$apiBaseUrl${p.profilePictureUrl}')
-                          : null,
-                      child: p.profilePictureUrl == null
-                          ? const Icon(Icons.person_rounded, color: kPrimaryGreen)
-                          : null,
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            p.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            p.displayRole,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
-                          ),
-                          const SizedBox(height: 4),
-                          Row(
-                            children: [
-                              const Icon(Icons.star_rounded, size: 15, color: Colors.amber),
-                              const SizedBox(width: 3),
-                              Text(
-                                '${p.rating.toStringAsFixed(1)} (${p.reviewsCount} reviews)',
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      decoration: BoxDecoration(
-                        color: kLightGreenBg,
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Text('Book',
-                          style: TextStyle(fontSize: 12, color: kPrimaryGreen, fontWeight: FontWeight.w600)),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          final name = services[index];
+          return _ServiceListTile(
+            title: name,
+            icon: iconFor(name),
+            rating: ratingFor(name),
+            onTap: () => onSelect(name),
           );
         },
       ),

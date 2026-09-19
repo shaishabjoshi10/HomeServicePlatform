@@ -33,15 +33,14 @@ class ProfileFormOptions {
   /// still usable (categories in particular matter for validation).
   static const fallback = ProfileFormOptions(
     serviceCategories: [
-      'Plumbing',
       'Electrical',
       'Cleaning',
-      'Carpentry',
+      'Plumbing',
       'Painting',
       'Appliance Repair',
+      'Carpentry',
+      'Laundry',
       'Pest Control',
-      'Gardening',
-      'Moving & Packing',
     ],
     experienceRanges: ['Less than 1 year', '1-3 years', '3-5 years', '5-10 years', '10+ years'],
     defaultCity: 'Kathmandu',
@@ -73,15 +72,14 @@ class ProviderService {
       // fall through to local fallback
     }
     return const [
-      'Plumbing',
       'Electrical',
       'Cleaning',
-      'Carpentry',
+      'Plumbing',
       'Painting',
       'Appliance Repair',
+      'Carpentry',
+      'Laundry',
       'Pest Control',
-      'Gardening',
-      'Moving & Packing',
     ];
   }
 
@@ -99,44 +97,6 @@ class ProviderService {
       // fall through to local fallback
     }
     return ProfileFormOptions.fallback;
-  }
-
-  static Future<List<ProviderProfile>> listProviders({
-    String? serviceCategory,
-    bool availableOnly = false,
-    bool verifiedOnly = false,
-    int limit = 50,
-  }) async {
-    final queryParams = <String, String>{
-      if (serviceCategory != null && serviceCategory.isNotEmpty) 'service_category': serviceCategory,
-      if (availableOnly) 'available_only': 'true',
-      if (verifiedOnly) 'verified_only': 'true',
-      'limit': limit.toString(),
-    };
-
-    final uri = Uri.parse(_baseUrl).replace(queryParameters: queryParams);
-
-    http.Response response;
-    try {
-      response = await http.get(uri).timeout(const Duration(seconds: 15));
-    } on TimeoutException {
-      throw ProviderServiceException('Request timed out. Please check your connection.');
-    } catch (_) {
-      throw ProviderServiceException('Unable to reach the server. Please check your connection.');
-    }
-
-    if (response.statusCode != 200) {
-      throw ProviderServiceException('Failed to load service providers.');
-    }
-
-    try {
-      final List<dynamic> data = jsonDecode(response.body) as List<dynamic>;
-      return data
-          .map((item) => ProviderProfile.fromJson(item as Map<String, dynamic>))
-          .toList();
-    } catch (_) {
-      throw ProviderServiceException('Unexpected response from server.');
-    }
   }
 
   /// Fetches the logged-in provider's own profile via GET /api/profile/me.

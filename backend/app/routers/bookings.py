@@ -1,13 +1,22 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
+from app.constants import find_service_job, format_price_label
 from app.database import get_db
 from app.deps import get_current_user
-from app.models import Booking, BookingStatus, ProviderProfile, Rating, User, UserRole
+from app.models import (
+    Booking,
+    BookingStatus,
+    ProviderProfile,
+    Rating,
+    User,
+    UserRole,
+    VerificationStatus,
+)
 from app.schemas import (
     BookingCreateRequest,
     BookingOut,
@@ -22,17 +31,25 @@ def _to_booking_out(
     booking: Booking,
     customer_name: str,
     customer_phone: str | None,
-    provider_name: str,
     rating: Rating | None = None,
 ) -> BookingOut:
+    # Provider identity is intentionally not part of the response: customers
+    # book a service and never see which individual provider was assigned.
     return BookingOut(
         id=booking.id,
         customer_id=booking.customer_id,
         customer_name=customer_name,
         customer_phone=customer_phone,
-        provider_id=booking.provider_id,
-        provider_name=provider_name,
         service_category=booking.service_category,
+        job_title=booking.job_title,
+        # Numeric comes back as a Decimal; the schema is float, so convert
+        # here rather than relying on Pydantic to do it silently.
+        price=float(booking.price) if booking.price is not None else None,
+        price_type=booking.price_type,
+        # Derived from the booking's *own* snapshotted price, not from the
+        # current catalogue — a booking always shows the price it was made
+        # at, even if that job has since been repriced.
+        price_label=format_price_label(booking.price, booking.price_type),
         address=booking.address,
         latitude=booking.latitude,
         longitude=booking.longitude,
@@ -48,32 +65,55 @@ def _to_booking_out(
     )
 
 
-def _recompute_provider_rating(db: Session, provider_id: uuid.UUID) -> None:
-    """
-    Recalculates a provider's cached average rating + review count from
-    every Rating row that references them, and writes the result back to
-    ProviderProfile.rating / reviews_count.
+# A booking counts towards a provider's current workload until it reaches
+# one of the terminal statuses (completed / rejected / cancelled).
+_OPEN_STATUSES = (
+    BookingStatus.pending,
+    BookingStatus.accepted,
+    BookingStatus.on_the_way,
+    BookingStatus.arrived,
+)
 
-    Recomputing the aggregate from scratch (rather than updating a
-    running average incrementally) is deliberate: it's simple, always
-    exactly consistent with the ratings table, and cheap enough at any
-    realistic review volume given the index on Rating.provider_id.
-    Called once, right after a new rating is committed, so the provider's
-    displayed rating updates automatically with no separate step needed.
+
+def _pick_provider(db: Session, service_category: str) -> User | None:
     """
-    avg_stars, review_count = (
-        db.query(func.avg(Rating.stars), func.count(Rating.id))
-        .filter(Rating.provider_id == provider_id)
-        .one()
+    Chooses which provider a new booking is assigned to, now that
+    customers pick a service rather than a person.
+
+    Eligible: providers whose profile offers this service, who are marked
+    available, and whose verification wasn't rejected. Among those, the
+    order of preference is:
+      1. verified providers before not-yet-verified ones,
+      2. the provider with the fewest open bookings (spreads the load),
+      3. random, so equally-loaded providers get an even share.
+
+    Returns None when nobody is eligible — the caller turns that into a
+    clear error for the customer.
+    """
+    open_jobs = (
+        db.query(Booking.provider_id.label("provider_id"), func.count(Booking.id).label("open_count"))
+        .filter(Booking.status.in_(_OPEN_STATUSES))
+        .group_by(Booking.provider_id)
+        .subquery()
     )
 
-    profile = db.query(ProviderProfile).filter(ProviderProfile.user_id == provider_id).first()
-    if not profile:
-        return
-
-    profile.rating = round(float(avg_stars), 1) if avg_stars is not None else 0.0
-    profile.reviews_count = review_count or 0
-    db.commit()
+    return (
+        db.query(User)
+        .join(ProviderProfile, ProviderProfile.user_id == User.id)
+        .outerjoin(open_jobs, open_jobs.c.provider_id == User.id)
+        .filter(
+            User.role == UserRole.provider,
+            ProviderProfile.service_category == service_category,
+            ProviderProfile.availability.is_(True),
+            ProviderProfile.verification_status != VerificationStatus.rejected,
+        )
+        .order_by(
+            case((ProviderProfile.verification_status == VerificationStatus.verified, 0), else_=1),
+            func.coalesce(open_jobs.c.open_count, 0),
+            func.random(),
+        )
+        .first()
+    )
 
 
 @router.post("", response_model=BookingOut, status_code=status.HTTP_201_CREATED)
@@ -88,14 +128,26 @@ def create_booking(
             detail="Only customer accounts can create bookings.",
         )
 
-    provider = db.query(User).filter(User.id == payload.provider_id, User.role == UserRole.provider).first()
+    provider = _pick_provider(db, payload.service_category)
     if not provider:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service provider not found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No {payload.service_category} professional is available right now. Please try again later.",
+        )
+
+    # Price comes from the server's catalogue, never from the request — the
+    # client has no price field to send. BookingCreateRequest has already
+    # rejected a job_title that isn't offered under this category, so a
+    # non-None job_title always resolves here.
+    job = find_service_job(payload.service_category, payload.job_title) if payload.job_title else None
 
     booking = Booking(
         customer_id=current_user.id,
         provider_id=provider.id,
         service_category=payload.service_category,
+        job_title=job.name if job else None,
+        price=job.price if job else None,
+        price_type=job.price_type.value if job else None,
         address=payload.address,
         latitude=payload.latitude,
         longitude=payload.longitude,
@@ -108,7 +160,7 @@ def create_booking(
     db.commit()
     db.refresh(booking)
 
-    return _to_booking_out(booking, current_user.full_name, current_user.phone, provider.full_name)
+    return _to_booking_out(booking, current_user.full_name, current_user.phone)
 
 
 @router.get("/me", response_model=list[BookingOut])
@@ -118,12 +170,10 @@ def list_my_bookings(
     db: Session = Depends(get_db),
 ):
     Customer = aliased(User)
-    Provider = aliased(User)
 
     query = (
-        db.query(Booking, Customer.full_name, Customer.phone, Provider.full_name, Rating)
+        db.query(Booking, Customer.full_name, Customer.phone, Rating)
         .join(Customer, Booking.customer_id == Customer.id)
-        .join(Provider, Booking.provider_id == Provider.id)
         .outerjoin(Rating, Rating.booking_id == Booking.id)
     )
 
@@ -138,8 +188,8 @@ def list_my_bookings(
     query = query.order_by(Booking.created_at.desc())
 
     return [
-        _to_booking_out(booking, customer_name, customer_phone, provider_name, rating)
-        for booking, customer_name, customer_phone, provider_name, rating in query.all()
+        _to_booking_out(booking, customer_name, customer_phone, rating)
+        for booking, customer_name, customer_phone, rating in query.all()
     ]
 
 
@@ -197,12 +247,11 @@ def update_booking_status(
     db.refresh(booking)
 
     customer = db.query(User).filter(User.id == booking.customer_id).first()
-    provider = db.query(User).filter(User.id == booking.provider_id).first()
 
     # No allowed transition above ever lands on/leaves 'completed', so a
     # rating (which can only be created once a booking is completed)
     # never exists at this point — nothing to fetch here.
-    return _to_booking_out(booking, customer.full_name, customer.phone, provider.full_name)
+    return _to_booking_out(booking, customer.full_name, customer.phone)
 
 
 @router.post("/{booking_id}/rating", response_model=BookingOut, status_code=status.HTTP_201_CREATED)
@@ -215,7 +264,7 @@ def rate_booking(
     if current_user.role != UserRole.customer:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only customers can rate a service provider.",
+            detail="Only customers can rate a service.",
         )
 
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
@@ -244,7 +293,7 @@ def rate_booking(
     rating = Rating(
         booking_id=booking.id,
         customer_id=booking.customer_id,
-        provider_id=booking.provider_id,
+        service_category=booking.service_category,
         stars=payload.stars,
         comment=payload.comment,
     )
@@ -263,7 +312,7 @@ def rate_booking(
         )
     db.refresh(rating)
 
-    _recompute_provider_rating(db, booking.provider_id)
-
-    provider = db.query(User).filter(User.id == booking.provider_id).first()
-    return _to_booking_out(booking, current_user.full_name, current_user.phone, provider.full_name, rating)
+    # No aggregate to update here: a service's overall rating is computed
+    # on read from the ratings table (see routers/services.py), so it is
+    # always exactly consistent with the ratings that exist.
+    return _to_booking_out(booking, current_user.full_name, current_user.phone, rating)

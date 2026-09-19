@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'screens/role_selection.dart';
+import 'screens/login.dart';
 
 const kPrimaryGreen = Color(0xFF1E7145);
 const kAccentGreen = Color(0xFF2F9E5B);
@@ -28,7 +28,7 @@ class GharSewaApp extends StatelessWidget {
         scaffoldBackgroundColor: Colors.white,
         textTheme: GoogleFonts.workSansTextTheme(),
       ),
-      home: const RoleSelectionPage(),
+      home: const LoginPage(),
     );
   }
 }

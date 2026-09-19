@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../main.dart';
 import '../services/auth_service.dart';
 import 'login.dart';
+import '../widgets/app_logo.dart';
 
 class SignupPage extends StatefulWidget {
   final UserRole role;
@@ -140,7 +141,7 @@ class _SignupPageState extends State<SignupPage> {
                 alignment: Alignment.centerLeft,
                 padding: EdgeInsets.zero,
               ),
-              Icon(Icons.home_repair_service_rounded, color: kAccentGreen, size: 56),
+              const AppLogo(size: 56),
               const SizedBox(height: 8),
               RichText(
                 text: const TextSpan(

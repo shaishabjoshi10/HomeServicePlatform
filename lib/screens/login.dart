@@ -4,13 +4,23 @@ import '../services/auth_service.dart';
 import 'customer_home.dart';
 import 'serviceprovider_home.dart';
 import 'signup.dart';
+import '../widgets/app_logo.dart';
 
 enum UserRole { customer, provider }
 
+/// The app's single entry screen: branding, a side-by-side "I am a
+/// Customer" / "I am a Service Provider" toggle, and the login form for
+/// whichever role is currently selected. There is no separate role-
+/// selection screen — picking a role and logging in both happen here.
 class LoginPage extends StatefulWidget {
-  final UserRole role;
+  /// Which role's option is highlighted (and whose form is shown) when the
+  /// screen first appears. Defaults to [UserRole.customer]. Callers that
+  /// already know the relevant role — e.g. returning here after signing up
+  /// as a provider, or after a provider logs out — can pass it so the user
+  /// doesn't have to reselect it.
+  final UserRole? role;
 
-  const LoginPage({super.key, required this.role});
+  const LoginPage({super.key, this.role});
 
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -21,16 +31,37 @@ class _LoginPageState extends State<LoginPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
+  late UserRole _selectedRole;
+
   bool _obscurePassword = true;
   bool _isLoading = false;
   bool _submitted = false;
   String? _errorMessage;
 
   @override
+  void initState() {
+    super.initState();
+    _selectedRole = widget.role ?? UserRole.customer;
+  }
+
+  @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  /// Switches which role's login the form submits as. Also clears any
+  /// error from the previous role's attempt and resets validation display,
+  /// since a message like "Invalid password" belongs to the login attempt
+  /// that produced it, not to whichever role is selected next.
+  void _selectRole(UserRole role) {
+    if (role == _selectedRole) return;
+    setState(() {
+      _selectedRole = role;
+      _errorMessage = null;
+      _submitted = false;
+    });
   }
 
   String? _validateIdentifier(String? value) {
@@ -66,7 +97,7 @@ class _LoginPageState extends State<LoginPage> {
     setState(() => _isLoading = true);
 
     try {
-      final roleString = widget.role == UserRole.customer ? 'customer' : 'provider';
+      final roleString = _selectedRole == UserRole.customer ? 'customer' : 'provider';
 
       final result = await AuthService.login(
         identifier: _emailController.text,
@@ -79,7 +110,7 @@ class _LoginPageState extends State<LoginPage> {
 
       if (!mounted) return;
 
-      if (widget.role == UserRole.customer) {
+      if (_selectedRole == UserRole.customer) {
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(
@@ -112,7 +143,7 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isProvider = widget.role == UserRole.provider;
+    final isProvider = _selectedRole == UserRole.provider;
 
     return Scaffold(
       body: SafeArea(
@@ -120,14 +151,8 @@ class _LoginPageState extends State<LoginPage> {
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: Column(
             children: [
-              const SizedBox(height: 24),
-              IconButton(
-                onPressed: () => Navigator.pop(context),
-                icon: const Icon(Icons.arrow_back_rounded),
-                alignment: Alignment.centerLeft,
-                padding: EdgeInsets.zero,
-              ),
-              Icon(Icons.home_repair_service_rounded, color: kAccentGreen, size: 56),
+              const SizedBox(height: 32),
+              const AppLogo(size: 56),
               const SizedBox(height: 8),
               RichText(
                 text: const TextSpan(
@@ -150,11 +175,40 @@ class _LoginPageState extends State<LoginPage> {
               ),
               const SizedBox(height: 6),
               Text(
-                isProvider
-                    ? 'Login to continue as a Service Provider'
-                    : 'Login to continue to your account',
+                'Select how you\'d like to continue',
                 textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+              ),
+              const SizedBox(height: 20),
+
+              // Role toggle: the two options sit side by side so both are
+              // visible at once, with the selected one clearly highlighted.
+              // Choosing a role here simply swaps which login the form
+              // below submits as — there's no separate screen to navigate
+              // to.
+              IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: _RoleToggleCard(
+                        icon: Icons.people_alt_rounded,
+                        label: 'I am a Customer',
+                        isSelected: _selectedRole == UserRole.customer,
+                        onTap: () => _selectRole(UserRole.customer),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _RoleToggleCard(
+                        icon: Icons.engineering_rounded,
+                        label: 'I am a Service Provider',
+                        isSelected: _selectedRole == UserRole.provider,
+                        onTap: () => _selectRole(UserRole.provider),
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 24),
 
@@ -183,12 +237,22 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                 ),
 
+              // Keyed on the selected role so switching roles rebuilds the
+              // form fresh — clearing any field-level validation styling
+              // left over from the other role's attempt.
               Form(
                 key: _formKey,
                 autovalidateMode: _submitted ? AutovalidateMode.onUserInteraction : AutovalidateMode.disabled,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Text(
+                      isProvider
+                          ? 'Login to continue as a Service Provider'
+                          : 'Login to continue as a Customer',
+                      style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                    ),
+                    const SizedBox(height: 16),
                     const Text(
                       'Email or Phone Number',
                       style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: kDarkText),
@@ -295,7 +359,7 @@ class _LoginPageState extends State<LoginPage> {
                           onTap: () {
                             Navigator.push(
                               context,
-                              MaterialPageRoute(builder: (_) => SignupPage(role: widget.role)),
+                              MaterialPageRoute(builder: (_) => SignupPage(role: _selectedRole)),
                             );
                           },
                           child: const Text(
@@ -307,6 +371,62 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     const SizedBox(height: 24),
                   ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One half of the role toggle at the top of the login screen. Shows
+/// filled/bordered in the app's green when selected, and a plain outline
+/// otherwise, so the current choice is unambiguous even with both options
+/// sitting side by side.
+class _RoleToggleCard extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _RoleToggleCard({
+    required this.icon,
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: isSelected ? kLightGreenBg : Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 18),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isSelected ? kPrimaryGreen : Colors.grey.shade300,
+              width: isSelected ? 1.5 : 1,
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: isSelected ? kPrimaryGreen : Colors.grey.shade500, size: 26),
+              const SizedBox(height: 8),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isSelected ? kPrimaryGreen : Colors.grey.shade700,
                 ),
               ),
             ],

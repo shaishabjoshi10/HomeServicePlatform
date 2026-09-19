@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../main.dart';
 import '../models/booking.dart';
+import '../models/service_job.dart';
 import '../services/booking_service.dart';
 import 'booking_timeline.dart';
 
@@ -134,9 +135,17 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
                 ),
               ],
             ),
-            if (b.serviceCategory != null) ...[
+            // The job, then the service it sits under — so the provider sees
+            // what the work actually is ("Fan Installation") before the
+            // broader category.
+            if (b.jobTitle != null || b.serviceCategory != null) ...[
               const SizedBox(height: 4),
-              Text(b.serviceCategory!, style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+              Text(
+                b.jobTitle != null && b.serviceCategory != null
+                    ? '${b.jobTitle} · ${b.serviceCategory}'
+                    : b.displayTitle,
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+              ),
             ],
             if (b.status != 'rejected' && b.status != 'cancelled') ...[
               const SizedBox(height: 20),
@@ -153,6 +162,17 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
             const SizedBox(height: 20),
             if (b.customerPhone != null && b.customerPhone!.isNotEmpty)
               _DetailRow(icon: Icons.phone_outlined, label: 'Phone', value: b.customerPhone!),
+            // What this job was booked at. The provider sees the same
+            // figure the customer agreed to, so there's no discrepancy to
+            // argue about on the doorstep.
+            if (b.hasPrice)
+              _DetailRow(
+                icon: Icons.payments_outlined,
+                label: b.priceType == PriceType.startingFrom ? 'Price (starting from)' : 'Price',
+                value: b.priceType == PriceType.startingFrom
+                    ? '${b.priceLabel!} · final price depends on the work needed'
+                    : b.priceLabel!,
+              ),
             _DetailRow(icon: Icons.location_on_outlined, label: 'Address', value: b.address),
             if (b.preferredDate != null)
               _DetailRow(

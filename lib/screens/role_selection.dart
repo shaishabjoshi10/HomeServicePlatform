@@ -66,28 +66,44 @@ class RoleSelectionPage extends StatelessWidget {
                 style: TextStyle(fontSize: 15, color: Colors.grey.shade600),
               ),
               const SizedBox(height: 40),
-              _RoleCard(
-                icon: Icons.people_alt_rounded,
-                title: 'Customer Login',
-                subtitle: 'Book trusted home services quickly and easily.',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const LoginPage(role: UserRole.customer),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              _RoleCard(
-                icon: Icons.engineering_rounded,
-                title: 'Service Provider Login',
-                subtitle:
-                'Manage bookings, grow your business and serve more customers.',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const LoginPage(role: UserRole.provider),
-                  ),
+              // Customer and Service Provider login sit side by side as two
+              // equal-width cards rather than stacked, so both are visible
+              // and selectable at a glance without scrolling past one to
+              // reach the other. Each keeps its own icon, title, and short
+              // description, with a gap and a border between them so the
+              // two stay clearly separated even though they share a row.
+              IntrinsicHeight(
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(
+                      child: _LoginOptionCard(
+                        icon: Icons.people_alt_rounded,
+                        title: 'Customer Login',
+                        subtitle: 'Book trusted home services quickly and easily.',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const LoginPage(role: UserRole.customer),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: _LoginOptionCard(
+                        icon: Icons.engineering_rounded,
+                        title: 'Service Provider Login',
+                        subtitle: 'Manage bookings and serve more customers.',
+                        onTap: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const LoginPage(role: UserRole.provider),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
               const SizedBox(height: 32),
@@ -168,6 +184,85 @@ class _SignupRoleSheet extends StatelessWidget {
             onTap: () => onPick(UserRole.provider),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A single login option shown side by side with the other role's, on the
+/// welcome screen. Laid out vertically (icon above title above subtitle)
+/// rather than in a row, since each card only gets half the screen's width
+/// here — [_RoleCard]'s left-icon/right-chevron row layout is for the
+/// full-width cards in the sign-up sheet instead.
+class _LoginOptionCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  const _LoginOptionCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(20),
+      elevation: 2,
+      shadowColor: Colors.black.withValues(alpha: 0.08),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+          // A visible border, on top of the shadow, keeps the two cards
+          // reading as clearly separate options even when they sit right
+          // next to each other in the same row.
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: const BoxDecoration(
+                  color: kLightGreenBg,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: kPrimaryGreen, size: 28),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: kDarkText,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                subtitle,
+                textAlign: TextAlign.center,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey.shade600,
+                  height: 1.3,
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

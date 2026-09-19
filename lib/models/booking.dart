@@ -1,11 +1,26 @@
+import 'service_job.dart';
+
 class Booking {
   final String id;
   final String customerId;
   final String customerName;
   final String? customerPhone;
-  final String providerId;
-  final String providerName;
   final String? serviceCategory;
+
+  /// The specific job booked under that category, e.g. "Fan Installation"
+  /// under "Electrical". Null for a booking made at category level (a
+  /// category with no jobs listed), or one made before jobs had prices.
+  final String? jobTitle;
+
+  /// What the job was priced at *when it was booked*, in NPR — a snapshot
+  /// taken server-side, so it stays correct even if that job is repriced
+  /// later. Null whenever [jobTitle] is null.
+  final double? price;
+  final PriceType? priceType;
+
+  /// Server-formatted display string for [price], e.g. "Rs. 600" or
+  /// "From Rs. 2,500".
+  final String? priceLabel;
   final String address;
   final double? latitude;
   final double? longitude;
@@ -15,7 +30,7 @@ class Booking {
   final String status; // pending | accepted | rejected | on_the_way | arrived | completed | cancelled
   final DateTime createdAt;
   final DateTime updatedAt;
-  final int? ratingStars; // 1-5 once the customer has rated this booking, else null
+  final int? ratingStars; // 1-5 once the customer has rated the service for this booking, else null
   final String? ratingComment;
   final DateTime? ratedAt;
 
@@ -23,14 +38,16 @@ class Booking {
     required this.id,
     required this.customerId,
     required this.customerName,
-    required this.providerId,
-    required this.providerName,
     required this.address,
     required this.status,
     required this.createdAt,
     required this.updatedAt,
     this.customerPhone,
     this.serviceCategory,
+    this.jobTitle,
+    this.price,
+    this.priceType,
+    this.priceLabel,
     this.latitude,
     this.longitude,
     this.problemDescription,
@@ -40,6 +57,13 @@ class Booking {
     this.ratingComment,
     this.ratedAt,
   });
+
+  /// True when this booking has a price to display.
+  bool get hasPrice => priceLabel != null;
+
+  /// What to headline the booking with: the specific job where there is
+  /// one, otherwise the service category.
+  String get displayTitle => jobTitle ?? serviceCategory ?? 'Service';
 
   /// True once this booking has been marked completed and the customer
   /// hasn't rated it yet — i.e. the "Rate" button should show.
@@ -51,9 +75,13 @@ class Booking {
       customerId: json['customer_id'].toString(),
       customerName: json['customer_name'] as String,
       customerPhone: json['customer_phone'] as String?,
-      providerId: json['provider_id'].toString(),
-      providerName: json['provider_name'] as String,
       serviceCategory: json['service_category'] as String?,
+      jobTitle: json['job_title'] as String?,
+      price: (json['price'] as num?)?.toDouble(),
+      priceType: json['price_type'] != null
+          ? PriceType.fromJson(json['price_type'] as String)
+          : null,
+      priceLabel: json['price_label'] as String?,
       address: json['address'] as String,
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),
