@@ -957,113 +957,142 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
       body: SafeArea(
         child: CustomScrollView(
           slivers: [
-            // Top bar
+            // ── Coloured header: location, notifications, greeting, and
+            // search — everything up to (and including) the search bar. It's
+            // one Container so the gradient and rounded bottom corners run
+            // behind all three pieces as a single banner; text and icons
+            // inside switch to white to stay readable against it. Nothing
+            // past the search bar (Popular Services onward) is touched.
             SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [kPrimaryGreen, kAccentGreen],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.only(
+                    bottomLeft: Radius.circular(28),
+                    bottomRight: Radius.circular(28),
+                  ),
+                ),
+                child: Column(
                   children: [
-                    InkWell(
-                      onTap: _setDefaultLocation,
-                      borderRadius: BorderRadius.circular(8),
+                    // Top bar
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
                       child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Icon(Icons.location_on_outlined, color: kPrimaryGreen, size: 18),
-                          const SizedBox(width: 4),
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 110),
-                            child: Text(
-                              _defaultLocation?.address ?? 'Kathmandu, Nepal',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(fontSize: 13, color: Colors.grey.shade800),
+                          InkWell(
+                            onTap: _setDefaultLocation,
+                            borderRadius: BorderRadius.circular(8),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.location_on_outlined, color: Colors.white, size: 18),
+                                const SizedBox(width: 4),
+                                ConstrainedBox(
+                                  constraints: const BoxConstraints(maxWidth: 110),
+                                  child: Text(
+                                    _defaultLocation?.address ?? 'Kathmandu, Nepal',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 13, color: Colors.white),
+                                  ),
+                                ),
+                                const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: Colors.white),
+                              ],
                             ),
                           ),
-                          const Icon(Icons.keyboard_arrow_down_rounded, size: 16),
+                          Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              const Icon(Icons.notifications_none_rounded, size: 24, color: Colors.white),
+                              Positioned(
+                                right: 0,
+                                top: 0,
+                                child: Container(
+                                  width: 8,
+                                  height: 8,
+                                  // White instead of the usual accent green —
+                                  // the badge would disappear against a green
+                                  // header otherwise.
+                                  decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+                                ),
+                              ),
+                            ],
+                          ),
                         ],
                       ),
                     ),
-                    Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        const Icon(Icons.notifications_none_rounded, size: 24),
-                        Positioned(
-                          right: 0,
-                          top: 0,
-                          child: Container(
-                            width: 8,
-                            height: 8,
-                            decoration: const BoxDecoration(color: kAccentGreen, shape: BoxShape.circle),
-                          ),
+
+                    // Greeting (hidden while searching to keep focus on results)
+                    if (!_isSearching)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'What service do you need today?',
+                                    style: TextStyle(
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.white,
+                                      height: 1.25,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            ProfilePictureAvatar(
+                              radius: 36,
+                              imageUrl: _profilePictureFullUrl,
+                              uploadPicture: _uploadOwnProfilePicture,
+                              onPictureUpdated: _onProfilePictureUpdated,
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
+
+                    // Search bar — white fill so it reads as a clear pill
+                    // sitting on the coloured banner, the way it would above
+                    // a plain white background.
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                      child: TextField(
+                        controller: _searchController,
+                        decoration: InputDecoration(
+                          hintText: 'Search for services...',
+                          prefixIcon: const Icon(Icons.search_rounded),
+                          suffixIcon: _isSearching
+                              ? IconButton(
+                            icon: const Icon(Icons.close_rounded),
+                            onPressed: () => _searchController.clear(),
+                          )
+                              : null,
+                          filled: true,
+                          fillColor: Colors.white,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide.none,
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                      ),
                     ),
                   ],
                 ),
               ),
             ),
 
-            // Greeting (hidden while searching to keep focus on results)
-            if (!_isSearching)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'What service do you need today?',
-                              style: TextStyle(
-                                fontSize: 22,
-                                fontWeight: FontWeight.w700,
-                                color: kDarkText,
-                                height: 1.25,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      ProfilePictureAvatar(
-                        radius: 36,
-                        imageUrl: _profilePictureFullUrl,
-                        uploadPicture: _uploadOwnProfilePicture,
-                        onPictureUpdated: _onProfilePictureUpdated,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-
-            // Search bar
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-                child: TextField(
-                  controller: _searchController,
-                  decoration: InputDecoration(
-                    hintText: 'Search for services...',
-                    prefixIcon: const Icon(Icons.search_rounded),
-                    suffixIcon: _isSearching
-                        ? IconButton(
-                      icon: const Icon(Icons.close_rounded),
-                      onPressed: () => _searchController.clear(),
-                    )
-                        : null,
-                    filled: true,
-                    fillColor: Colors.grey.shade100,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      borderSide: BorderSide.none,
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                ),
-              ),
-            ),
+            // Breathing room between the header's rounded corner and
+            // whatever comes next (search results or Popular Services),
+            // neither of which carries its own top spacing.
+            const SliverToBoxAdapter(child: SizedBox(height: 16)),
 
             // ── Search results (shown only while typing) ──
             if (_isSearching) ...[
