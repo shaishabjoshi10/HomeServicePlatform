@@ -291,6 +291,18 @@ class BookingStatusUpdateRequest(BaseModel):
     status: BookingStatus
 
 
+class BookingLocationUpdateRequest(BaseModel):
+    """
+    A single live-location sample the provider's device pushes while en
+    route. Sent frequently (every few seconds) while the booking is
+    'on_the_way' / 'arrived', so this is deliberately the smallest
+    possible payload rather than the full booking.
+    """
+
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
 class BookingOut(BaseModel):
     id: uuid.UUID
     customer_id: uuid.UUID
@@ -316,6 +328,15 @@ class BookingOut(BaseModel):
     status: BookingStatus
     created_at: datetime
     updated_at: datetime
+
+    # The provider's live position while navigating to the customer.
+    # Present only while status is 'on_the_way' / 'arrived'; null before
+    # the provider sets out and again once the job reaches a terminal
+    # status (see update_booking_status / update_booking_location in
+    # routers/bookings.py, which set and clear these together).
+    provider_latitude: float | None = None
+    provider_longitude: float | None = None
+    provider_location_updated_at: datetime | None = None
 
     # Present only once the customer has rated this booking (a rating of
     # the overall service, not of a provider). Kept inline

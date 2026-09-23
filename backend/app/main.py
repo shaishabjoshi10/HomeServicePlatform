@@ -144,6 +144,40 @@ def _migrate_booking_pricing() -> None:
 
 _migrate_booking_pricing()
 
+
+def _migrate_booking_live_location() -> None:
+    """
+    Adds the provider live-location columns to an existing 'bookings'
+    table, for the same reason as the helpers above: create_all() never
+    alters a table that already exists, so a database created before
+    provider navigation existed would reject every location update and
+    every booking read with a raw DB error. All three columns are
+    nullable — an existing row simply has no live location, exactly like
+    a booking that hasn't reached 'on_the_way' yet.
+
+    A no-op on a database that's already current or was just created fresh.
+    """
+    if engine.dialect.name != "postgresql":
+        return
+
+    inspector = inspect(engine)
+    if "bookings" not in set(inspector.get_table_names()):
+        return
+
+    columns = {c["name"] for c in inspector.get_columns("bookings")}
+    with engine.begin() as conn:
+        if "provider_latitude" not in columns:
+            conn.execute(text("ALTER TABLE bookings ADD COLUMN provider_latitude FLOAT"))
+        if "provider_longitude" not in columns:
+            conn.execute(text("ALTER TABLE bookings ADD COLUMN provider_longitude FLOAT"))
+        if "provider_location_updated_at" not in columns:
+            conn.execute(
+                text("ALTER TABLE bookings ADD COLUMN provider_location_updated_at TIMESTAMPTZ")
+            )
+
+
+_migrate_booking_live_location()
+
 app = FastAPI(title="GharSewa API")
 
 app.add_middleware(

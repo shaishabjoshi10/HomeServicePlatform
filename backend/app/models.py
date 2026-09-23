@@ -193,6 +193,17 @@ class Booking(Base):
         default=BookingStatus.pending,
         index=True,
     )
+    # The provider's own live position while they're actively navigating to
+    # the customer (statuses 'on_the_way' / 'arrived'). All three are NULL
+    # otherwise — before the provider sets out, and again once the booking
+    # reaches a terminal status, at which point update_booking_status()
+    # clears them so a finished job never keeps reporting a stale location.
+    # Deliberately booking-scoped rather than living on ProviderProfile: a
+    # provider only ever shares live location in the context of *this*
+    # job, and clearing it here can't accidentally affect another booking.
+    provider_latitude = Column(Float, nullable=True)
+    provider_longitude = Column(Float, nullable=True)
+    provider_location_updated_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

@@ -5,6 +5,7 @@ import '../models/booking.dart';
 import '../models/service_job.dart';
 import '../services/booking_service.dart';
 import 'booking_timeline.dart';
+import 'provider_navigation_map.dart';
 
 /// Full detail view for one of the provider's own bookings — customer info,
 /// address, notes, timestamps, the status timeline, and the accept/decline/
@@ -157,6 +158,27 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: BookingTimeline(status: b.status),
+              ),
+            ],
+            // The navigation map: the customer's pin shows as soon as the
+            // job is accepted; the provider's own live position and the
+            // route between the two join it once they're on the way, and
+            // both disappear again the moment the job is marked completed
+            // (this whole block simply stops being included in the tree,
+            // which is what tears the map's State — and its GPS stream —
+            // down; see ProviderNavigationMap).
+            if ((b.status == 'accepted' || b.status == 'on_the_way' || b.status == 'arrived') &&
+                b.latitude != null &&
+                b.longitude != null) ...[
+              const SizedBox(height: 20),
+              ProviderNavigationMap(
+                key: ValueKey(b.id),
+                accessToken: widget.accessToken,
+                bookingId: b.id,
+                status: b.status,
+                customerLatitude: b.latitude!,
+                customerLongitude: b.longitude!,
+                customerAddress: b.address,
               ),
             ],
             const SizedBox(height: 20),

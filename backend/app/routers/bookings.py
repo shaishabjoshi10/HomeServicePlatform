@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import case, func
@@ -19,10 +20,19 @@ from app.models import (
 )
 from app.schemas import (
     BookingCreateRequest,
+    BookingLocationUpdateRequest,
     BookingOut,
     BookingStatusUpdateRequest,
     RatingCreateRequest,
 )
+
+# Statuses during which a provider is expected to be actively navigating to
+# the customer, and so is allowed to push live-location updates. Chosen to
+# match exactly what the frontend's navigation map keeps rendering (see
+# ProviderNavigationMap): it starts tracking on 'on_the_way' and only stops
+# once the booking is marked 'completed', passing through 'arrived' in
+# between without interruption.
+_LOCATION_SHARING_STATUSES = (BookingStatus.on_the_way, BookingStatus.arrived)
 
 router = APIRouter(prefix="/api/bookings", tags=["bookings"])
 
@@ -59,6 +69,9 @@ def _to_booking_out(
         status=booking.status,
         created_at=booking.created_at,
         updated_at=booking.updated_at,
+        provider_latitude=booking.provider_latitude,
+        provider_longitude=booking.provider_longitude,
+        provider_location_updated_at=booking.provider_location_updated_at,
         rating_stars=rating.stars if rating else None,
         rating_comment=rating.comment if rating else None,
         rated_at=rating.created_at if rating else None,
@@ -193,6 +206,82 @@ def list_my_bookings(
     ]
 
 
+def _get_owned_booking(db: Session, booking_id: uuid.UUID, current_user: User) -> Booking:
+    """Shared lookup for the single-booking endpoints below: 404 if the
+    booking doesn't exist, 403 if it exists but isn't the caller's own
+    (as either its customer or its assigned provider)."""
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
+
+    is_provider = current_user.role == UserRole.provider and booking.provider_id == current_user.id
+    is_customer = current_user.role == UserRole.customer and booking.customer_id == current_user.id
+    if not is_provider and not is_customer:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to view this booking.",
+        )
+    return booking
+
+
+@router.get("/{booking_id}", response_model=BookingOut)
+def get_booking(
+    booking_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Fetches a single booking — used for cheap, frequent polling (e.g. the
+    customer's app checking whether the provider's live location has moved)
+    where re-fetching the whole /me list would be wasteful.
+    """
+    booking = _get_owned_booking(db, booking_id, current_user)
+    customer = db.query(User).filter(User.id == booking.customer_id).first()
+    rating = db.query(Rating).filter(Rating.booking_id == booking.id).first()
+    return _to_booking_out(booking, customer.full_name, customer.phone, rating)
+
+
+@router.put("/{booking_id}/location", response_model=BookingOut)
+def update_booking_location(
+    booking_id: uuid.UUID,
+    payload: BookingLocationUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Called repeatedly by the provider's own device while they're en route,
+    to keep the booking's live-location fields current. Only the assigned
+    provider may push their own location, and only while the booking is
+    actually in a state where navigation makes sense — a stray update
+    against a pending or completed booking is rejected rather than
+    silently accepted.
+    """
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
+
+    if current_user.role != UserRole.provider or booking.provider_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You don't have permission to update this booking's location.",
+        )
+
+    if booking.status not in _LOCATION_SHARING_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Live location can only be shared while a job is on the way or arrived.",
+        )
+
+    booking.provider_latitude = payload.latitude
+    booking.provider_longitude = payload.longitude
+    booking.provider_location_updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(booking)
+
+    customer = db.query(User).filter(User.id == booking.customer_id).first()
+    return _to_booking_out(booking, customer.full_name, customer.phone)
+
+
 @router.patch("/{booking_id}/status", response_model=BookingOut)
 def update_booking_status(
     booking_id: uuid.UUID,
@@ -243,14 +332,25 @@ def update_booking_status(
         )
 
     booking.status = new_status
+
+    # Stop live location sharing the moment a job is marked completed: clear
+    # the fields rather than just leaving the frontend to ignore them, so a
+    # finished booking can never be polled into showing a stale position.
+    # (No other transition here can leave `_LOCATION_SHARING_STATUSES`,
+    # since 'on_the_way' -> 'arrived' -> 'completed' is the only path out.)
+    if new_status == BookingStatus.completed:
+        booking.provider_latitude = None
+        booking.provider_longitude = None
+        booking.provider_location_updated_at = None
+
     db.commit()
     db.refresh(booking)
 
     customer = db.query(User).filter(User.id == booking.customer_id).first()
 
-    # No allowed transition above ever lands on/leaves 'completed', so a
-    # rating (which can only be created once a booking is completed)
-    # never exists at this point — nothing to fetch here.
+    # A rating (which can only be created once a booking is completed, via
+    # the separate /rating endpoint below) never exists yet at the moment
+    # a booking *first* transitions to 'completed' here — nothing to fetch.
     return _to_booking_out(booking, customer.full_name, customer.phone)
 
 

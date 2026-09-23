@@ -30,6 +30,14 @@ class Booking {
   final String status; // pending | accepted | rejected | on_the_way | arrived | completed | cancelled
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  /// The provider's own live position while navigating to the customer.
+  /// Both null before the provider taps "I'm on my way" and again once
+  /// the job is marked completed — see [isProviderLocationLive].
+  final double? providerLatitude;
+  final double? providerLongitude;
+  final DateTime? providerLocationUpdatedAt;
+
   final int? ratingStars; // 1-5 once the customer has rated the service for this booking, else null
   final String? ratingComment;
   final DateTime? ratedAt;
@@ -53,6 +61,9 @@ class Booking {
     this.problemDescription,
     this.notes,
     this.preferredDate,
+    this.providerLatitude,
+    this.providerLongitude,
+    this.providerLocationUpdatedAt,
     this.ratingStars,
     this.ratingComment,
     this.ratedAt,
@@ -68,6 +79,10 @@ class Booking {
   /// True once this booking has been marked completed and the customer
   /// hasn't rated it yet — i.e. the "Rate" button should show.
   bool get canBeRated => status == 'completed' && ratingStars == null;
+
+  /// True while the provider is actively sharing their live position for
+  /// this booking (they've set out and haven't marked the job completed).
+  bool get isProviderLocationLive => providerLatitude != null && providerLongitude != null;
 
   factory Booking.fromJson(Map<String, dynamic> json) {
     return Booking(
@@ -91,6 +106,11 @@ class Booking {
       status: json['status'] as String,
       createdAt: DateTime.parse(json['created_at'] as String),
       updatedAt: DateTime.parse(json['updated_at'] as String),
+      providerLatitude: (json['provider_latitude'] as num?)?.toDouble(),
+      providerLongitude: (json['provider_longitude'] as num?)?.toDouble(),
+      providerLocationUpdatedAt: json['provider_location_updated_at'] != null
+          ? DateTime.parse(json['provider_location_updated_at'] as String)
+          : null,
       ratingStars: json['rating_stars'] as int?,
       ratingComment: json['rating_comment'] as String?,
       ratedAt: json['rated_at'] != null ? DateTime.parse(json['rated_at'] as String) : null,

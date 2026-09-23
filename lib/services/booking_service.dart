@@ -99,6 +99,43 @@ class BookingService {
     return Booking.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
 
+  /// Fetches a single booking — used for lightweight, frequent polling
+  /// (e.g. the customer's app checking whether the provider's live
+  /// location has moved) instead of re-fetching the whole booking list.
+  static Future<Booking> getBooking({
+    required String accessToken,
+    required String bookingId,
+  }) async {
+    final response = await _send(() => http.get(
+      Uri.parse('$_baseUrl/$bookingId'),
+      headers: _authHeaders(accessToken),
+    ));
+
+    _checkStatus(response, expected: 200);
+    return Booking.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  /// Pushes one live-location sample for the provider currently navigating
+  /// to this booking's customer. Called repeatedly (every few seconds)
+  /// while the booking is 'on_the_way' / 'arrived'; the server rejects it
+  /// outside that window, so callers should stop calling this once the
+  /// booking is marked completed rather than relying on the server 400.
+  static Future<Booking> updateProviderLocation({
+    required String accessToken,
+    required String bookingId,
+    required double latitude,
+    required double longitude,
+  }) async {
+    final response = await _send(() => http.put(
+      Uri.parse('$_baseUrl/$bookingId/location'),
+      headers: _authHeaders(accessToken),
+      body: jsonEncode({'latitude': latitude, 'longitude': longitude}),
+    ));
+
+    _checkStatus(response, expected: 200);
+    return Booking.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
   /// Rates the overall service for a completed booking (1-5 stars,
   /// optional comment) — a rating of the service, not of a provider. The backend
   /// rejects this if the booking isn't completed, isn't the caller's own,
