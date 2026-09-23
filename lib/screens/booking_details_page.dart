@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../main.dart';
@@ -5,6 +7,7 @@ import '../models/booking.dart';
 import '../models/service_job.dart';
 import '../services/booking_service.dart';
 import 'booking_timeline.dart';
+import 'customer_navigation_map.dart';
 
 /// Full detail view for one of the customer's own bookings — address,
 /// notes, timestamps, the status timeline, and the cancel/rate actions.
@@ -13,6 +16,14 @@ import 'booking_timeline.dart';
 /// reflect immediately without waiting on the list to reload; the list
 /// re-fetches from the server itself once the user navigates back, so it
 /// always ends up showing the current state regardless.
+///
+/// It also polls the server for that same booking (see [_pollBooking])
+/// from the moment it's accepted onward. There's no push channel from the
+/// backend, so this is what makes the provider's live location — and the
+/// status changes that turn it on and off — show up on this page in real
+/// time without the customer having to leave and come back: the moment a
+/// poll's status is no longer 'accepted' / 'on_the_way' / 'arrived',
+/// [_shouldPoll] goes false and polling stops on its own.
 class BookingDetailsPage extends StatefulWidget {
   final String accessToken;
   final Booking booking;
@@ -26,10 +37,50 @@ class BookingDetailsPage extends StatefulWidget {
 class _BookingDetailsPageState extends State<BookingDetailsPage> {
   late Booking _booking;
 
+  Timer? _pollTimer;
+  static const _pollInterval = Duration(seconds: 4);
+
+  /// Whether the booking's status can still change on its own (via the
+  /// provider's actions) in a way this page needs to reflect live — worth
+  /// polling for. False for every terminal status (completed / rejected /
+  /// cancelled) and for 'pending', where nothing to show here changes yet.
+  bool get _shouldPoll =>
+      _booking.status == 'accepted' || _booking.status == 'on_the_way' || _booking.status == 'arrived';
+
   @override
   void initState() {
     super.initState();
     _booking = widget.booking;
+    if (_shouldPoll) _startPolling();
+  }
+
+  void _startPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(_pollInterval, (_) => _pollBooking());
+  }
+
+  void _stopPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+  }
+
+  Future<void> _pollBooking() async {
+    try {
+      final updated = await BookingService.getBooking(accessToken: widget.accessToken, bookingId: _booking.id);
+      if (!mounted) return;
+      setState(() => _booking = updated);
+      // Reached a terminal status since the last poll — nothing left that
+      // can still change on its own, so stop asking the server.
+      if (!_shouldPoll) _stopPolling();
+    } catch (_) {
+      // Best-effort: a missed poll just means we try again next tick.
+    }
+  }
+
+  @override
+  void dispose() {
+    _stopPolling();
+    super.dispose();
   }
 
   Future<void> _cancelBooking() async {
@@ -197,6 +248,23 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                   borderRadius: BorderRadius.circular(16),
                 ),
                 child: BookingTimeline(status: b.status),
+              ),
+            ],
+            // The provider's live location: appears the moment they tap
+            // "I'm on my way" (status polling above is what notices that
+            // without the customer having to refresh) and disappears again
+            // — along with the route and the "waiting" placeholder it
+            // shows before the first GPS fix arrives — the instant the job
+            // is marked completed, since this block then simply stops
+            // being part of the tree.
+            if ((b.status == 'on_the_way' || b.status == 'arrived') && b.latitude != null && b.longitude != null) ...[
+              const SizedBox(height: 20),
+              CustomerNavigationMap(
+                key: ValueKey(b.id),
+                customerLatitude: b.latitude!,
+                customerLongitude: b.longitude!,
+                providerLatitude: b.providerLatitude,
+                providerLongitude: b.providerLongitude,
               ),
             ],
             const SizedBox(height: 20),
