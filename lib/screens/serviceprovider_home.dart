@@ -31,7 +31,7 @@ class ServiceProviderHomePage extends StatefulWidget {
 
 class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
   int _navIndex = 0;
-  static const int _profileTabIndex = 4;
+  static const int _profileTabIndex = 3;
 
   ProviderProfile? _profile;
   bool _loadingProfile = true;
@@ -201,7 +201,7 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
     }
     if (index == 1) {
       // "Bookings" — pushes the full list instead of switching an in-page tab,
-      // since Earnings/Messages don't have their own screens built yet.
+      // since Earnings doesn't have its own screen built yet.
       Navigator.push(
         context,
         MaterialPageRoute(builder: (_) => ProviderBookingsPage(accessToken: widget.accessToken)),
@@ -298,46 +298,6 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                           if (updated == true) {
                             _loadProfile();
                           }
-                        },
-                      ),
-                      _ProfileMenuTile(
-                        icon: Icons.build_outlined,
-                        label: 'Manage Services',
-                        onTap: () {
-                          Navigator.pop(context);
-                          // TODO: navigate to manage services page
-                        },
-                      ),
-                      _ProfileMenuTile(
-                        icon: Icons.event_available_outlined,
-                        label: 'Availability & Schedule',
-                        onTap: () {
-                          Navigator.pop(context);
-                          // TODO: navigate to availability settings
-                        },
-                      ),
-                      _ProfileMenuTile(
-                        icon: Icons.account_balance_wallet_outlined,
-                        label: 'Earnings & Payouts',
-                        onTap: () {
-                          Navigator.pop(context);
-                          // TODO: navigate to earnings page
-                        },
-                      ),
-                      _ProfileMenuTile(
-                        icon: Icons.history_rounded,
-                        label: 'Job History',
-                        onTap: () {
-                          Navigator.pop(context);
-                          // TODO: navigate to job history page
-                        },
-                      ),
-                      _ProfileMenuTile(
-                        icon: Icons.verified_user_outlined,
-                        label: 'Verification & Documents',
-                        onTap: () {
-                          Navigator.pop(context);
-                          // TODO: navigate to verification page
                         },
                       ),
                       _ProfileMenuTile(
@@ -913,7 +873,6 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
           NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'Home'),
           NavigationDestination(icon: Icon(Icons.calendar_today_outlined), selectedIcon: Icon(Icons.calendar_today_rounded), label: 'Bookings'),
           NavigationDestination(icon: Icon(Icons.account_balance_wallet_outlined), selectedIcon: Icon(Icons.account_balance_wallet_rounded), label: 'Earnings'),
-          NavigationDestination(icon: Icon(Icons.chat_bubble_outline_rounded), selectedIcon: Icon(Icons.chat_bubble_rounded), label: 'Messages'),
           NavigationDestination(icon: Icon(Icons.person_outline_rounded), selectedIcon: Icon(Icons.person_rounded), label: 'Profile'),
         ],
       ),
