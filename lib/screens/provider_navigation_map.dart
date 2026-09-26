@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
@@ -9,6 +10,50 @@ import 'package:latlong2/latlong.dart';
 
 import '../main.dart';
 import '../services/booking_service.dart';
+
+/// Immutable snapshot of everything the map body needs to render, at one
+/// point in time. Kept separate from the tracking `State` itself so that
+/// both the compact, inline map and the full-screen map opened by tapping
+/// it can render from the exact same live data via a single
+/// `ValueListenable`, instead of the full-screen view being frozen at
+/// whatever the data happened to be the moment it was opened.
+class _NavSnapshot {
+  final LatLng? providerLocation;
+  final List<LatLng> routePoints;
+  final double? routeDistanceMeters;
+  final double? routeDurationSeconds;
+  final String? locationError;
+  final bool isTracking;
+
+  const _NavSnapshot({
+    this.providerLocation,
+    this.routePoints = const [],
+    this.routeDistanceMeters,
+    this.routeDurationSeconds,
+    this.locationError,
+    required this.isTracking,
+  });
+
+  _NavSnapshot copyWith({
+    LatLng? providerLocation,
+    bool clearProviderLocation = false,
+    List<LatLng>? routePoints,
+    double? routeDistanceMeters,
+    double? routeDurationSeconds,
+    String? locationError,
+    bool clearLocationError = false,
+    bool? isTracking,
+  }) {
+    return _NavSnapshot(
+      providerLocation: clearProviderLocation ? null : (providerLocation ?? this.providerLocation),
+      routePoints: routePoints ?? this.routePoints,
+      routeDistanceMeters: routeDistanceMeters ?? this.routeDistanceMeters,
+      routeDurationSeconds: routeDurationSeconds ?? this.routeDurationSeconds,
+      locationError: clearLocationError ? null : (locationError ?? this.locationError),
+      isTracking: isTracking ?? this.isTracking,
+    );
+  }
+}
 
 /// Live navigation map shown on a provider's booking details page once a
 /// booking has been accepted. What it shows layers on top of the booking's
@@ -31,6 +76,12 @@ import '../services/booking_service.dart';
 ///                           us. That's what actually "stops live location
 ///                           sharing and removes the route/location from
 ///                           the map".
+///
+/// Tapping the map pushes a full-screen page showing the exact same
+/// content, larger — see [_openFullScreen]. It reads from the same
+/// [_NavSnapshot] notifier as the compact map, so it keeps updating live
+/// (new GPS fixes, route refreshes) for as long as it's open, rather than
+/// showing a frozen snapshot from the moment it was tapped.
 ///
 /// Routing uses the public OSRM demo server, matching the OpenStreetMap
 /// stack the rest of the app already uses for tiles/geocoding (see
@@ -58,27 +109,20 @@ class ProviderNavigationMap extends StatefulWidget {
 }
 
 class _ProviderNavigationMapState extends State<ProviderNavigationMap> {
-  final MapController _mapController = MapController();
+  bool get _isTracking => widget.status == 'on_the_way' || widget.status == 'arrived';
+
+  late final ValueNotifier<_NavSnapshot> _snapshot =
+  ValueNotifier(_NavSnapshot(isTracking: _isTracking));
 
   StreamSubscription<Position>? _positionSub;
   Timer? _routeRefreshTimer;
-
-  LatLng? _providerLocation;
-  List<LatLng> _routePoints = [];
-  double? _routeDistanceMeters;
-  double? _routeDurationSeconds;
-
-  String? _locationError;
   bool _fetchingRoute = false;
-  bool _fittedInitialBounds = false;
 
   // Throttle: don't push every single GPS sample to the server.
   DateTime? _lastPushedAt;
   static const _minPushInterval = Duration(seconds: 4);
 
   LatLng get _customerLocation => LatLng(widget.customerLatitude, widget.customerLongitude);
-
-  bool get _isTracking => widget.status == 'on_the_way' || widget.status == 'arrived';
 
   @override
   void initState() {
@@ -91,6 +135,7 @@ class _ProviderNavigationMapState extends State<ProviderNavigationMap> {
     super.didUpdateWidget(oldWidget);
     final wasTracking = oldWidget.status == 'on_the_way' || oldWidget.status == 'arrived';
     if (_isTracking && !wasTracking) {
+      _snapshot.value = _snapshot.value.copyWith(isTracking: true);
       _startTracking();
     } else if (!_isTracking && wasTracking) {
       _stopTracking();
@@ -99,12 +144,14 @@ class _ProviderNavigationMapState extends State<ProviderNavigationMap> {
 
   @override
   void dispose() {
-    _stopTracking();
+    _positionSub?.cancel();
+    _routeRefreshTimer?.cancel();
+    _snapshot.dispose();
     super.dispose();
   }
 
   Future<void> _startTracking() async {
-    setState(() => _locationError = null);
+    _snapshot.value = _snapshot.value.copyWith(clearLocationError: true);
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) throw Exception('Location services are off');
@@ -118,9 +165,9 @@ class _ProviderNavigationMapState extends State<ProviderNavigationMap> {
       }
     } catch (_) {
       if (!mounted) return;
-      setState(() {
-        _locationError = "Couldn't access your location. Enable location sharing to start the journey.";
-      });
+      _snapshot.value = _snapshot.value.copyWith(
+        locationError: "Couldn't access your location. Enable location sharing to start the journey.",
+      );
       return;
     }
 
@@ -145,7 +192,8 @@ class _ProviderNavigationMapState extends State<ProviderNavigationMap> {
     // Keeps the route reasonably fresh even if the provider is stationary
     // for a while (no new GPS samples to trigger a refresh on their own).
     _routeRefreshTimer = Timer.periodic(const Duration(seconds: 20), (_) {
-      if (_providerLocation != null) _fetchRoute(_providerLocation!);
+      final current = _snapshot.value.providerLocation;
+      if (current != null) _fetchRoute(current);
     });
   }
 
@@ -154,20 +202,15 @@ class _ProviderNavigationMapState extends State<ProviderNavigationMap> {
     _positionSub = null;
     _routeRefreshTimer?.cancel();
     _routeRefreshTimer = null;
-    _providerLocation = null;
-    _routePoints = [];
-    _routeDistanceMeters = null;
-    _routeDurationSeconds = null;
-    _fittedInitialBounds = false;
+    _snapshot.value = _NavSnapshot(isTracking: false);
   }
 
   void _onNewPosition(Position position) {
     if (!mounted) return;
     final point = LatLng(position.latitude, position.longitude);
-    setState(() => _providerLocation = point);
+    _snapshot.value = _snapshot.value.copyWith(providerLocation: point);
     _pushLocation(point);
     _fetchRoute(point);
-    _maybeFitBounds();
   }
 
   Future<void> _pushLocation(LatLng point) async {
@@ -194,8 +237,8 @@ class _ProviderNavigationMapState extends State<ProviderNavigationMap> {
       final to = _customerLocation;
       final uri = Uri.parse(
         'https://router.project-osrm.org/route/v1/driving/'
-        '${from.longitude},${from.latitude};${to.longitude},${to.latitude}'
-        '?overview=full&geometries=geojson',
+            '${from.longitude},${from.latitude};${to.longitude},${to.latitude}'
+            '?overview=full&geometries=geojson',
       );
       final response = await http.get(uri).timeout(const Duration(seconds: 10));
 
@@ -209,11 +252,11 @@ class _ProviderNavigationMapState extends State<ProviderNavigationMap> {
               .map((c) => LatLng((c as List<dynamic>)[1] as double, (c[0] as num).toDouble()))
               .toList();
           if (!mounted) return;
-          setState(() {
-            _routePoints = points;
-            _routeDistanceMeters = (route['distance'] as num?)?.toDouble();
-            _routeDurationSeconds = (route['duration'] as num?)?.toDouble();
-          });
+          _snapshot.value = _snapshot.value.copyWith(
+            routePoints: points,
+            routeDistanceMeters: (route['distance'] as num?)?.toDouble(),
+            routeDurationSeconds: (route['duration'] as num?)?.toDouble(),
+          );
         }
       }
     } catch (_) {
@@ -225,15 +268,131 @@ class _ProviderNavigationMapState extends State<ProviderNavigationMap> {
     }
   }
 
-  void _maybeFitBounds() {
-    if (_fittedInitialBounds || _providerLocation == null) return;
+  void _openFullScreen() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => _FullScreenNavigationMap(
+          snapshot: _snapshot,
+          customerLocation: _customerLocation,
+          customerAddress: widget.customerAddress,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: _openFullScreen,
+      child: SizedBox(
+        height: 260,
+        child: _NavigationMapBody(
+          snapshot: _snapshot,
+          customerLocation: _customerLocation,
+          expanded: false,
+        ),
+      ),
+    );
+  }
+}
+
+/// The full-screen page opened by tapping the compact map. Same location,
+/// markers, route and live-location information as the inline card — just
+/// larger, and kept live via the shared [snapshot] rather than frozen at
+/// the moment it was opened.
+class _FullScreenNavigationMap extends StatelessWidget {
+  final ValueListenable<_NavSnapshot> snapshot;
+  final LatLng customerLocation;
+  final String customerAddress;
+
+  const _FullScreenNavigationMap({
+    required this.snapshot,
+    required this.customerLocation,
+    required this.customerAddress,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.white,
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        foregroundColor: kDarkText,
+        elevation: 0,
+        title: const Text('Live Navigation'),
+      ),
+      body: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.location_on_rounded, color: kPrimaryGreen, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      customerAddress,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 13, color: kDarkText),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: _NavigationMapBody(
+                snapshot: snapshot,
+                customerLocation: customerLocation,
+                expanded: true,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Presentational map body shared by the compact card and the full-screen
+/// page: a `FlutterMap` with the customer/provider markers and route,
+/// rebuilding whenever [snapshot] changes. Each instance owns its own
+/// `MapController` and fits the camera to the two points the first time a
+/// provider fix shows up — both the compact and full-screen instances can
+/// be mounted at once (during the push/pop transition, and for as long as
+/// the full-screen page stays open), so they can't share one controller.
+class _NavigationMapBody extends StatefulWidget {
+  final ValueListenable<_NavSnapshot> snapshot;
+  final LatLng customerLocation;
+  final bool expanded;
+
+  const _NavigationMapBody({
+    required this.snapshot,
+    required this.customerLocation,
+    required this.expanded,
+  });
+
+  @override
+  State<_NavigationMapBody> createState() => _NavigationMapBodyState();
+}
+
+class _NavigationMapBodyState extends State<_NavigationMapBody> {
+  final MapController _mapController = MapController();
+  bool _fittedInitialBounds = false;
+
+  void _maybeFitBounds(LatLng? providerLocation) {
+    if (_fittedInitialBounds || providerLocation == null) return;
     _fittedInitialBounds = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       try {
         _mapController.fitCamera(
           CameraFit.bounds(
-            bounds: LatLngBounds(_providerLocation!, _customerLocation),
-            padding: const EdgeInsets.fromLTRB(36, 36, 36, 36),
+            bounds: LatLngBounds(providerLocation, widget.customerLocation),
+            padding: EdgeInsets.fromLTRB(36, 36, 36, widget.expanded ? 96 : 36),
           ),
         );
       } catch (_) {
@@ -242,132 +401,161 @@ class _ProviderNavigationMapState extends State<ProviderNavigationMap> {
     });
   }
 
-  String _formatEta() {
-    if (_routeDistanceMeters == null || _routeDurationSeconds == null) return '';
-    final km = (_routeDistanceMeters! / 1000).toStringAsFixed(1);
-    final minutes = (_routeDurationSeconds! / 60).ceil();
+  String _formatEta(_NavSnapshot snap) {
+    if (snap.routeDistanceMeters == null || snap.routeDurationSeconds == null) return '';
+    final km = (snap.routeDistanceMeters! / 1000).toStringAsFixed(1);
+    final minutes = (snap.routeDurationSeconds! / 60).ceil();
     return '$km km away · about $minutes min';
   }
 
   @override
   Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(16),
-      child: SizedBox(
-        height: 260,
-        child: Stack(
-          children: [
-            FlutterMap(
-              mapController: _mapController,
-              options: MapOptions(
-                initialCenter: _customerLocation,
-                initialZoom: 14,
-              ),
-              children: [
-                TileLayer(
-                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  userAgentPackageName: 'com.gharsewa.app',
-                ),
-                if (_routePoints.isNotEmpty)
-                  PolylineLayer(
-                    polylines: [
-                      Polyline(points: _routePoints, strokeWidth: 4, color: Colors.blue.shade600),
-                    ],
-                  )
-                else if (_providerLocation != null)
-                  // No OSRM route yet (still loading, or the request
-                  // failed) — a plain straight line still shows direction.
-                  PolylineLayer(
-                    polylines: [
-                      Polyline(
-                        points: [_providerLocation!, _customerLocation],
-                        strokeWidth: 3,
-                        color: Colors.blue.shade200,
-                      ),
-                    ],
+    final markerSize = widget.expanded ? 48.0 : 40.0;
+    final providerMarkerSize = widget.expanded ? 44.0 : 36.0;
+    final etaFontSize = widget.expanded ? 14.0 : 12.0;
+
+    return ValueListenableBuilder<_NavSnapshot>(
+      valueListenable: widget.snapshot,
+      builder: (context, snap, _) {
+        _maybeFitBounds(snap.providerLocation);
+        final providerLocation = snap.providerLocation;
+
+        return ClipRRect(
+          borderRadius: widget.expanded ? BorderRadius.zero : BorderRadius.circular(16),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: FlutterMap(
+                  mapController: _mapController,
+                  options: MapOptions(
+                    initialCenter: widget.customerLocation,
+                    initialZoom: 14,
                   ),
-                MarkerLayer(
-                  markers: [
-                    Marker(
-                      point: _customerLocation,
-                      width: 40,
-                      height: 40,
-                      child: Icon(Icons.location_on_rounded, color: kPrimaryGreen, size: 36),
+                  children: [
+                    TileLayer(
+                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'com.gharsewa.app',
                     ),
-                    if (_providerLocation != null)
-                      Marker(
-                        point: _providerLocation!,
-                        width: 36,
-                        height: 36,
-                        child: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.shade600,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
-                            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                    if (snap.routePoints.isNotEmpty)
+                      PolylineLayer(
+                        polylines: [
+                          Polyline(points: snap.routePoints, strokeWidth: 4, color: Colors.blue.shade600),
+                        ],
+                      )
+                    else if (providerLocation != null)
+                    // No OSRM route yet (still loading, or the request
+                    // failed) — a plain straight line still shows direction.
+                      PolylineLayer(
+                        polylines: [
+                          Polyline(
+                            points: [providerLocation, widget.customerLocation],
+                            strokeWidth: 3,
+                            color: Colors.blue.shade200,
                           ),
-                          child: const Icon(Icons.two_wheeler_rounded, color: Colors.white, size: 18),
-                        ),
+                        ],
                       ),
+                    MarkerLayer(
+                      markers: [
+                        Marker(
+                          point: widget.customerLocation,
+                          width: markerSize,
+                          height: markerSize,
+                          child: Icon(Icons.location_on_rounded, color: kPrimaryGreen, size: markerSize * 0.9),
+                        ),
+                        if (providerLocation != null)
+                          Marker(
+                            point: providerLocation,
+                            width: providerMarkerSize,
+                            height: providerMarkerSize,
+                            child: Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade600,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 2),
+                                boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                              ),
+                              child: Icon(Icons.two_wheeler_rounded, color: Colors.white, size: providerMarkerSize * 0.5),
+                            ),
+                          ),
+                      ],
+                    ),
                   ],
                 ),
-              ],
-            ),
-
-            // ETA / distance pill, only once we have a route.
-            if (_isTracking && _routeDistanceMeters != null)
-              Positioned(
-                left: 10,
-                top: 10,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6)],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.directions_car_filled_rounded, size: 14, color: Colors.blue.shade600),
-                      const SizedBox(width: 6),
-                      Text(_formatEta(), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                    ],
-                  ),
-                ),
               ),
 
-            // Location-permission error banner.
-            if (_locationError != null)
-              Positioned(
-                left: 10,
-                right: 10,
-                bottom: 10,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.red.shade50,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.red.shade200),
+              // ETA / distance pill, only once we have a route.
+              if (snap.isTracking && snap.routeDistanceMeters != null)
+                Positioned(
+                  left: 10,
+                  top: 10,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 6)],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.directions_car_filled_rounded, size: 14, color: Colors.blue.shade600),
+                        const SizedBox(width: 6),
+                        Text(_formatEta(snap),
+                            style: TextStyle(fontSize: etaFontSize, fontWeight: FontWeight.w600)),
+                      ],
+                    ),
                   ),
-                  child: Row(
-                    children: [
-                      Icon(Icons.error_outline_rounded, size: 16, color: Colors.red.shade600),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          _locationError!,
-                          style: TextStyle(fontSize: 11, color: Colors.red.shade700),
+                ),
+
+              // Location-permission error banner.
+              if (snap.locationError != null)
+                Positioned(
+                  left: 10,
+                  right: 10,
+                  bottom: 10,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.red.shade200),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.error_outline_rounded, size: 16, color: Colors.red.shade600),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            snap.locationError!,
+                            style: TextStyle(fontSize: 11, color: Colors.red.shade700),
+                          ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
-          ],
-        ),
-      ),
+
+              // A small affordance on the compact card only, hinting it's
+              // tappable without needing to change any other booking UI.
+              if (!widget.expanded)
+                Positioned(
+                  right: 10,
+                  bottom: 10,
+                  child: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                    ),
+                    child: Icon(Icons.fullscreen_rounded, size: 16, color: Colors.grey.shade700),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

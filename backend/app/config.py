@@ -14,6 +14,15 @@ class Settings(BaseSettings):
     upload_dir: str = "uploads"
     max_upload_mb: int = 5
 
+    # The one Admin Dashboard account the app ships with — seeded into the
+    # `admins` table at startup (see main._seed_default_admin) rather than
+    # compared against directly, so the password is hashed at rest like
+    # every other password in this app. Overridable via env vars
+    # (ADMIN_EMAIL / ADMIN_PASSWORD) for a real deployment; these defaults
+    # exist so the dashboard works out of the box.
+    admin_email: str = "gharsewaadmin@gmail.com"
+    admin_password: str = "gharsewanepal"
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @property

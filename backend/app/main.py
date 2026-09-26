@@ -8,9 +8,10 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 
 from app.config import settings
-from app.database import Base, engine
-from app.models import BookingStatus
-from app.routers import auth, bookings, profile, providers, services
+from app.database import Base, SessionLocal, engine
+from app.models import Admin, BookingStatus
+from app.routers import admin, auth, bookings, profile, providers, services
+from app.security import hash_password
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -178,6 +179,33 @@ def _migrate_booking_live_location() -> None:
 
 _migrate_booking_live_location()
 
+
+def _seed_default_admin() -> None:
+    """
+    Ensures the fixed Admin Dashboard account (Settings.admin_email /
+    admin_password) exists, so the dashboard has a working login as soon
+    as the app is deployed — nobody has to run a separate setup step.
+
+    Only ever *creates* the row when it's missing; it never overwrites an
+    existing admin's password. That means changing the password by hand
+    later (direct DB update, or adding further admins the same way) isn't
+    silently undone on the next restart — this is purely a first-run
+    convenience, not a way to reset credentials.
+    """
+    db = SessionLocal()
+    try:
+        email = settings.admin_email.strip().lower()
+        existing = db.query(Admin).filter(Admin.email == email).first()
+        if existing:
+            return
+        db.add(Admin(email=email, password_hash=hash_password(settings.admin_password)))
+        db.commit()
+    finally:
+        db.close()
+
+
+_seed_default_admin()
+
 app = FastAPI(title="GharSewa API")
 
 app.add_middleware(
@@ -212,6 +240,7 @@ app.include_router(profile.router)
 app.include_router(providers.router)
 app.include_router(services.router)
 app.include_router(bookings.router)
+app.include_router(admin.router)
 
 
 @app.get("/health")

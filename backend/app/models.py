@@ -44,6 +44,27 @@ class BookingStatus(str, enum.Enum):
     cancelled = "cancelled"      # customer cancelled (only while still pending)
 
 
+class Admin(Base):
+    """
+    A staff account for the Admin Dashboard — deliberately its own table
+    rather than another `User` row with a third role. Keeping it fully
+    separate means the admin login and every admin-only endpoint (see
+    deps.get_current_admin) can never be reached with a customer/provider
+    token, and vice versa, without any extra role checks scattered through
+    the existing customer/provider code — the two simply query different
+    tables. The app seeds one row here at startup from the fixed
+    credentials in Settings (see main._seed_default_admin); more can be
+    added by hand later the same way.
+    """
+
+    __tablename__ = "admins"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email = Column(String(255), nullable=False, unique=True, index=True)
+    password_hash = Column(String(255), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class User(Base):
     """
     A single person can hold both a 'customer' account and a 'provider'

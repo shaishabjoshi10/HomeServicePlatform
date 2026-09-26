@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../main.dart';
 import '../services/auth_service.dart';
+import 'admin_login.dart';
 import 'customer_home.dart';
 import 'serviceprovider_home.dart';
 import 'signup.dart';
@@ -368,6 +369,25 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 12),
+                    // A discreet entry point into the Admin Dashboard —
+                    // deliberately understated (plain grey text, no icon)
+                    // since it's a staff-only login, not something a
+                    // customer or provider is meant to notice or use.
+                    Center(
+                      child: GestureDetector(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const AdminLoginPage()),
+                          );
+                        },
+                        child: Text(
+                          'Admin Login',
+                          style: TextStyle(color: Colors.grey.shade500, fontSize: 12, fontWeight: FontWeight.w500),
+                        ),
+                      ),
                     ),
                     const SizedBox(height: 24),
                   ],

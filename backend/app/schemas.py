@@ -402,3 +402,122 @@ class ServiceCatalogEntryOut(BaseModel):
     rating: float
     reviews_count: int
     jobs: list[ServiceJobOut]
+
+
+# ---------------------------------------------------------------------------
+# Admin Dashboard
+# ---------------------------------------------------------------------------
+
+
+class AdminLoginRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    password: str = Field(min_length=1, max_length=128)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str) -> str:
+        return v.strip().lower()
+
+
+class AdminOut(BaseModel):
+    id: uuid.UUID
+    email: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AdminAuthResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    admin: AdminOut
+
+
+class AdminStatsOut(BaseModel):
+    """Counts for the dashboard's top-level overview cards."""
+
+    total_customers: int
+    total_providers: int
+    pending_verifications: int
+    verified_providers: int
+    rejected_providers: int
+    total_bookings: int
+
+
+class AdminCustomerOut(BaseModel):
+    """One row in the admin's customer list."""
+
+    id: uuid.UUID
+    full_name: str
+    email: str | None
+    phone: str | None
+    created_at: datetime
+    address: str | None
+    profile_picture_url: str | None
+    total_bookings: int
+
+
+class AdminProviderOut(BaseModel):
+    """One row in the admin's provider list."""
+
+    id: uuid.UUID
+    full_name: str
+    email: str | None
+    phone: str | None
+    created_at: datetime
+    service_category: str | None
+    experience: str | None
+    city: str
+    verification_status: VerificationStatus
+    availability: bool
+    profile_picture_url: str | None
+    total_bookings: int
+
+
+class AdminProviderDetailOut(BaseModel):
+    """
+    The full profile shown on the admin's provider review page — everything
+    AdminProviderOut has, plus the personal/contact details and the
+    verification documents an admin needs to actually review before
+    verifying or rejecting the account.
+    """
+
+    id: uuid.UUID
+    full_name: str
+    email: str | None
+    phone: str | None
+    created_at: datetime
+    service_category: str | None
+    experience: str | None
+    bio: str | None
+    date_of_birth: date | None
+    city: str
+    citizenship_number: str | None
+    citizenship_front_url: str | None
+    citizenship_back_url: str | None
+    alternative_email: str | None
+    alternative_phone: str | None
+    profile_picture_url: str | None
+    verification_status: VerificationStatus
+    availability: bool
+    total_bookings: int
+    completed_bookings: int
+
+
+class AdminVerificationUpdateRequest(BaseModel):
+    """
+    Deliberately only allows 'verified' or 'rejected' — an admin *decides*
+    a submitted profile one way or the other; there's no admin action that
+    puts a provider back to 'pending' (that only happens naturally, when
+    the provider re-uploads a document — see upload_citizenship_documents
+    in routers/profile.py).
+    """
+
+    status: VerificationStatus
+
+    @field_validator("status")
+    @classmethod
+    def must_be_a_decision(cls, v: VerificationStatus) -> VerificationStatus:
+        if v not in (VerificationStatus.verified, VerificationStatus.rejected):
+            raise ValueError("status must be 'verified' or 'rejected'")
+        return v
