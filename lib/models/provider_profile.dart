@@ -39,6 +39,12 @@ class ProviderProfile {
   /// service category yet (e.g. right after signup).
   String get displayRole => serviceCategory?.isNotEmpty == true ? serviceCategory! : 'Service Provider';
 
+  /// Whether an admin has verified this account. Only a verified provider
+  /// can accept a booking — see AdminService/the Admin Dashboard for the
+  /// verify/reject flow, and update_booking_status in the backend for the
+  /// server-side enforcement this UI-side check mirrors.
+  bool get isVerified => verificationStatus == 'verified';
+
   /// True once personal info, professional info, and documents have all
   /// been filled in — used to prompt providers to complete their profile.
   bool get isComplete =>

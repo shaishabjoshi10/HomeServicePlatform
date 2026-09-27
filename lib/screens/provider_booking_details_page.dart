@@ -23,7 +23,20 @@ class ProviderBookingDetailsPage extends StatefulWidget {
   final String accessToken;
   final Booking booking;
 
-  const ProviderBookingDetailsPage({super.key, required this.accessToken, required this.booking});
+  /// Whether an admin has verified the *current provider's own* account —
+  /// not anything about this booking. Passed in by the caller (which
+  /// already has the provider's profile loaded) rather than fetched here,
+  /// so this page doesn't need its own extra network round-trip just to
+  /// know whether to let the Accept button through. See
+  /// ProviderProfile.isVerified for where that value comes from.
+  final bool isVerified;
+
+  const ProviderBookingDetailsPage({
+    super.key,
+    required this.accessToken,
+    required this.booking,
+    required this.isVerified,
+  });
 
   @override
   State<ProviderBookingDetailsPage> createState() => _ProviderBookingDetailsPageState();
@@ -213,6 +226,46 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
               _DetailRow(icon: Icons.notes_rounded, label: 'Notes', value: b.notes!),
             _DetailRow(icon: Icons.access_time_rounded, label: 'Requested On', value: _formatDate(b.createdAt)),
             if (b.status == 'pending') ...[
+              // An unverified provider can still decline a request (that
+              // just gives it up, no harm done) but can't accept one — an
+              // admin has to verify their account first. This mirrors the
+              // 403 the backend itself would return if this button were
+              // somehow bypassed (see update_booking_status).
+              if (!widget.isVerified) ...[
+                const SizedBox(height: 16),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.orange.shade200),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(Icons.hourglass_top_rounded, color: Colors.orange.shade800, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Pending Verification',
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.orange.shade900),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              "You can't accept bookings until an admin verifies your account.",
+                              style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
@@ -230,7 +283,7 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  onPressed: _updating ? null : () => _respond('accepted'),
+                  onPressed: (_updating || !widget.isVerified) ? null : () => _respond('accepted'),
                   style: FilledButton.styleFrom(
                     backgroundColor: kPrimaryGreen,
                     padding: const EdgeInsets.symmetric(vertical: 14),

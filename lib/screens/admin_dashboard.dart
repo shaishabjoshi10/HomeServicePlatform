@@ -160,34 +160,57 @@ class _OverviewTabState extends State<_OverviewTab> {
             children: [
               Text('Signed in as ${widget.adminEmail}', style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
               const SizedBox(height: 16),
-              GridView(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                // A fixed mainAxisExtent (a set height in logical pixels)
-                // rather than childAspectRatio: aspect ratio derives the
-                // cell's height from its *width*, which shrinks on
-                // narrower phones and under larger system font-scaling
-                // settings — exactly what was overflowing the card's
-                // content (icon box + value + label) here. A fixed height
-                // stays generous regardless of screen width or text scale.
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 2,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 12,
-                  mainAxisExtent: 118,
-                ),
+              // A Column of Rows, not a GridView: a grid cell is given a
+              // fixed height up front (whether via childAspectRatio or a
+              // literal mainAxisExtent) and the card's content must then
+              // fit inside whatever that number turns out to be — which
+              // still overflowed even at a generous 118, because the real
+              // rendered text height depends on the device's system font-
+              // scaling setting, which varies by device and isn't
+              // something a single fixed number can account for. A Row of
+              // Expanded cards has no such ceiling: each card's Column is
+              // mainAxisSize.min, so the Row (and this whole section) is
+              // simply exactly as tall as the cards' own content needs,
+              // on any device, at any text scale — there is no fixed
+              // number left to be wrong about.
+              Row(
                 children: [
-                  _StatCard(icon: Icons.people_alt_rounded, color: kPrimaryGreen, label: 'Customers', value: '${stats.totalCustomers}'),
-                  _StatCard(icon: Icons.engineering_rounded, color: Colors.blue.shade600, label: 'Providers', value: '${stats.totalProviders}'),
-                  _StatCard(icon: Icons.verified_rounded, color: Colors.green.shade600, label: 'Verified', value: '${stats.verifiedProviders}'),
-                  _StatCard(icon: Icons.block_rounded, color: Colors.red.shade600, label: 'Rejected', value: '${stats.rejectedProviders}'),
-                  _StatCard(icon: Icons.event_note_rounded, color: Colors.purple.shade400, label: 'Total Bookings', value: '${stats.totalBookings}'),
-                  _StatCard(
-                    icon: Icons.pending_actions_rounded,
-                    color: Colors.orange.shade700,
-                    label: 'Pending Review',
-                    value: '${stats.pendingVerifications}',
-                    highlighted: stats.pendingVerifications > 0,
+                  Expanded(
+                    child: _StatCard(icon: Icons.people_alt_rounded, color: kPrimaryGreen, label: 'Customers', value: '${stats.totalCustomers}'),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _StatCard(icon: Icons.engineering_rounded, color: Colors.blue.shade600, label: 'Providers', value: '${stats.totalProviders}'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: _StatCard(icon: Icons.verified_rounded, color: Colors.green.shade600, label: 'Verified', value: '${stats.verifiedProviders}'),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _StatCard(icon: Icons.block_rounded, color: Colors.red.shade600, label: 'Rejected', value: '${stats.rejectedProviders}'),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: _StatCard(icon: Icons.event_note_rounded, color: Colors.purple.shade400, label: 'Total Bookings', value: '${stats.totalBookings}'),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _StatCard(
+                      icon: Icons.pending_actions_rounded,
+                      color: Colors.orange.shade700,
+                      label: 'Pending Review',
+                      value: '${stats.pendingVerifications}',
+                      highlighted: stats.pendingVerifications > 0,
+                    ),
                   ),
                 ],
               ),

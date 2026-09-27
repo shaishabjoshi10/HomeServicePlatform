@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import case, func
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
@@ -94,14 +94,20 @@ def _pick_provider(db: Session, service_category: str) -> User | None:
     customers pick a service rather than a person.
 
     Eligible: providers whose profile offers this service, who are marked
-    available, and whose verification wasn't rejected. Among those, the
-    order of preference is:
-      1. verified providers before not-yet-verified ones,
-      2. the provider with the fewest open bookings (spreads the load),
-      3. random, so equally-loaded providers get an even share.
+    available, and — critically — whose account an admin has already
+    verified. A pending or rejected provider is never assigned a new
+    booking in the first place: since they're also blocked from accepting
+    one (see update_booking_status below), assigning them one anyway would
+    only leave it stuck, unacceptable by anyone, until the customer gives
+    up and cancels. Among the remaining, eligible providers, the order of
+    preference is:
+      1. the provider with the fewest open bookings (spreads the load),
+      2. random, so equally-loaded providers get an even share.
 
     Returns None when nobody is eligible — the caller turns that into a
-    clear error for the customer.
+    clear error for the customer. In practice this is also what happens
+    while every provider for a category is still pending verification;
+    that's expected, not a bug.
     """
     open_jobs = (
         db.query(Booking.provider_id.label("provider_id"), func.count(Booking.id).label("open_count"))
@@ -118,10 +124,9 @@ def _pick_provider(db: Session, service_category: str) -> User | None:
             User.role == UserRole.provider,
             ProviderProfile.service_category == service_category,
             ProviderProfile.availability.is_(True),
-            ProviderProfile.verification_status != VerificationStatus.rejected,
+            ProviderProfile.verification_status == VerificationStatus.verified,
         )
         .order_by(
-            case((ProviderProfile.verification_status == VerificationStatus.verified, 0), else_=1),
             func.coalesce(open_jobs.c.open_count, 0),
             func.random(),
         )
@@ -302,6 +307,22 @@ def update_booking_status(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You don't have permission to update this booking.",
         )
+
+    # A provider may only ever accept a booking once an admin has verified
+    # their account. _pick_provider already only assigns new bookings to
+    # verified providers, so in the ordinary case this never even fires —
+    # this exists for the same reason the Flutter UI hides/disables the
+    # Accept button for an unverified provider: as a second, server-side
+    # guarantee that can't be bypassed by calling the API directly,
+    # covering the edge case where an admin reverts a provider's
+    # verification after a booking was already assigned to them.
+    if is_provider and booking.status == BookingStatus.pending and new_status == BookingStatus.accepted:
+        provider_profile = db.query(ProviderProfile).filter(ProviderProfile.user_id == current_user.id).first()
+        if not provider_profile or provider_profile.verification_status != VerificationStatus.verified:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your account is pending verification. You can't accept bookings until an admin verifies your profile.",
+            )
 
     # Only specific, sane status transitions are allowed, per role. The
     # provider's happy path is a strict sequence — accepted -> on_the_way

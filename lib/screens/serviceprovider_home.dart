@@ -482,7 +482,11 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
               ),
             ),
 
-            // Complete-profile nudge
+            // Complete-profile nudge — and, once the profile itself is
+            // complete, a "Pending Verification" nudge instead. The two
+            // are mutually exclusive on purpose: an admin can't verify an
+            // incomplete submission, so a provider is always in exactly
+            // one of these states until they're actually verified.
             if (!_loadingProfile && _profile != null && !_profile!.isComplete)
               SliverToBoxAdapter(
                 child: Padding(
@@ -521,6 +525,44 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                           Icon(Icons.chevron_right_rounded, color: Colors.orange.shade800),
                         ],
                       ),
+                    ),
+                  ),
+                ),
+              )
+            else if (!_loadingProfile && _profile != null && !_profile!.isVerified)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.orange.shade200),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.hourglass_top_rounded, color: Colors.orange.shade800),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Pending Verification',
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: Colors.orange.shade900),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                "An admin is reviewing your documents. You'll be able to accept booking "
+                                    "requests as soon as your account is verified.",
+                                style: TextStyle(fontSize: 12, color: Colors.orange.shade800),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -599,6 +641,7 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                                 builder: (_) => ProviderBookingDetailsPage(
                                   accessToken: widget.accessToken,
                                   booking: b,
+                                  isVerified: _profile?.isVerified ?? false,
                                 ),
                               ),
                             );
@@ -673,7 +716,11 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                                       const SizedBox(width: 10),
                                       Expanded(
                                         child: FilledButton(
-                                          onPressed: isUpdating ? null : () => _respondToBooking(b, 'accepted'),
+                                          // Declining never needs verification — only accepting a
+                                          // job does, so that's the only action gated here.
+                                          onPressed: (isUpdating || _profile?.isVerified != true)
+                                              ? null
+                                              : () => _respondToBooking(b, 'accepted'),
                                           style: FilledButton.styleFrom(backgroundColor: kPrimaryGreen),
                                           child: isUpdating
                                               ? const SizedBox(
@@ -686,6 +733,21 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                                       ),
                                     ],
                                   ),
+                                  if (_profile?.isVerified != true) ...[
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      children: [
+                                        Icon(Icons.hourglass_top_rounded, size: 13, color: Colors.orange.shade800),
+                                        const SizedBox(width: 4),
+                                        Expanded(
+                                          child: Text(
+                                            'Verification required to accept new jobs.',
+                                            style: TextStyle(fontSize: 11, color: Colors.orange.shade800, fontWeight: FontWeight.w500),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
                                 ],
                               ),
                             ),
@@ -753,6 +815,7 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                                   builder: (_) => ProviderBookingDetailsPage(
                                     accessToken: widget.accessToken,
                                     booking: b,
+                                    isVerified: _profile?.isVerified ?? false,
                                   ),
                                 ),
                               );
