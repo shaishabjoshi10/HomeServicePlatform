@@ -30,9 +30,9 @@ class ServiceCatalogService {
     try {
       response = await http
           .get(
-            Uri.parse('$apiBaseUrl/api/services/catalog'),
-            headers: {'Authorization': 'Bearer $accessToken'},
-          )
+        Uri.parse('$apiBaseUrl/api/services/catalog'),
+        headers: {'Authorization': 'Bearer $accessToken'},
+      )
           .timeout(const Duration(seconds: 15));
     } on TimeoutException {
       throw ServiceCatalogException('Request timed out. Please check your connection.');
@@ -86,7 +86,7 @@ class ServiceCatalogService {
         ServiceJob(
           name: 'Switchboard & Socket Repair',
           description:
-              'Fixing faulty switches, sockets, and switchboards, including sparking or tripping issues.',
+          'Fixing faulty switches, sockets, and switchboards, including sparking or tripping issues.',
           price: 500,
           priceLabel: 'Rs. 500',
         ),
@@ -117,7 +117,7 @@ class ServiceCatalogService {
         ServiceJob(
           name: 'Deep House Cleaning',
           description:
-              'A thorough top-to-bottom clean covering floors, windows, kitchen surfaces, and bathrooms — ideal before a festival, move-in, or move-out.',
+          'A thorough top-to-bottom clean covering floors, windows, kitchen surfaces, and bathrooms — ideal before a festival, move-in, or move-out.',
           price: 2500,
           priceType: PriceType.startingFrom,
           priceLabel: 'From Rs. 2,500',
@@ -125,14 +125,14 @@ class ServiceCatalogService {
         ServiceJob(
           name: 'Bathroom & Kitchen Cleaning',
           description:
-              'Focused scrubbing and sanitizing of tiles, sinks, and stovetops to cut through built-up grease and grime.',
+          'Focused scrubbing and sanitizing of tiles, sinks, and stovetops to cut through built-up grease and grime.',
           price: 1200,
           priceLabel: 'Rs. 1,200',
         ),
         ServiceJob(
           name: 'Sofa & Carpet Cleaning',
           description:
-              'Steam or shampoo cleaning for sofas, carpets, and rugs to lift dust, stains, and odours.',
+          'Steam or shampoo cleaning for sofas, carpets, and rugs to lift dust, stains, and odours.',
           price: 1500,
           priceType: PriceType.startingFrom,
           priceLabel: 'From Rs. 1,500',
@@ -145,7 +145,7 @@ class ServiceCatalogService {
         ServiceJob(
           name: 'Leak & Pipe Repair',
           description:
-              'Fixing leaking taps, pipes, and joints to stop water wastage and prevent damage to walls and floors.',
+          'Fixing leaking taps, pipes, and joints to stop water wastage and prevent damage to walls and floors.',
           price: 700,
           priceType: PriceType.startingFrom,
           priceLabel: 'From Rs. 700',
@@ -230,7 +230,7 @@ class ServiceCatalogService {
         ServiceJob(
           name: 'Door & Window Fitting',
           description:
-              "Repairing or installing doors, windows, hinges, and locks that stick or don't close properly.",
+          "Repairing or installing doors, windows, hinges, and locks that stick or don't close properly.",
           price: 1000,
           priceType: PriceType.startingFrom,
           priceLabel: 'From Rs. 1,000',
@@ -256,7 +256,7 @@ class ServiceCatalogService {
         ServiceJob(
           name: 'Dry Cleaning',
           description:
-              'Professional cleaning for suits, sarees, woollens, and other delicate garments.',
+          'Professional cleaning for suits, sarees, woollens, and other delicate garments.',
           price: 400,
           priceType: PriceType.startingFrom,
           priceLabel: 'From Rs. 400',
@@ -281,7 +281,7 @@ class ServiceCatalogService {
         ServiceJob(
           name: 'Termite Treatment',
           description:
-              'Targeted treatment for termite infestations in wooden furniture and structures.',
+          'Targeted treatment for termite infestations in wooden furniture and structures.',
           price: 3500,
           priceType: PriceType.startingFrom,
           priceLabel: 'From Rs. 3,500',

@@ -71,6 +71,9 @@ class ServiceJob(NamedTuple):
     name: str
     description: str
     price: int  # NPR
+    # Job photos are bundled directly into the Flutter app under
+    # assets/service-jobs/ and looked up there by job name — the catalogue
+    # itself carries no image data.
     price_type: PriceType = PriceType.fixed
 
     @property
@@ -97,7 +100,7 @@ SERVICE_JOBS: dict[str, list[ServiceJob]] = {
             "Deep House Cleaning",
             "A thorough top-to-bottom clean covering floors, windows, kitchen surfaces, and bathrooms — ideal before a festival, move-in, or move-out.",
             2500,
-            PriceType.starting_from,
+            price_type=PriceType.starting_from,
         ),
         ServiceJob(
             "Bathroom & Kitchen Cleaning",
@@ -108,7 +111,7 @@ SERVICE_JOBS: dict[str, list[ServiceJob]] = {
             "Sofa & Carpet Cleaning",
             "Steam or shampoo cleaning for sofas, carpets, and rugs to lift dust, stains, and odours.",
             1500,
-            PriceType.starting_from,
+            price_type=PriceType.starting_from,
         ),
     ],
     "Plumbing": [
@@ -116,7 +119,7 @@ SERVICE_JOBS: dict[str, list[ServiceJob]] = {
             "Leak & Pipe Repair",
             "Fixing leaking taps, pipes, and joints to stop water wastage and prevent damage to walls and floors.",
             700,
-            PriceType.starting_from,
+            price_type=PriceType.starting_from,
         ),
         ServiceJob(
             "Tap & Fixture Installation",
@@ -127,7 +130,7 @@ SERVICE_JOBS: dict[str, list[ServiceJob]] = {
             "Water Tank Cleaning",
             "Draining, scrubbing, and sanitizing overhead or underground water tanks.",
             1500,
-            PriceType.starting_from,
+            price_type=PriceType.starting_from,
         ),
     ],
     "Electrical": [
@@ -150,7 +153,7 @@ SERVICE_JOBS: dict[str, list[ServiceJob]] = {
             "Wiring & Rewiring",
             "Inspecting and replacing old or unsafe household wiring.",
             1500,
-            PriceType.starting_from,
+            price_type=PriceType.starting_from,
         ),
     ],
     "Carpentry": [
@@ -158,13 +161,13 @@ SERVICE_JOBS: dict[str, list[ServiceJob]] = {
             "Furniture Repair",
             "Fixing broken chairs, tables, cupboards, and other wooden furniture.",
             800,
-            PriceType.starting_from,
+            price_type=PriceType.starting_from,
         ),
         ServiceJob(
             "Door & Window Fitting",
             "Repairing or installing doors, windows, hinges, and locks that stick or don't close properly.",
             1000,
-            PriceType.starting_from,
+            price_type=PriceType.starting_from,
         ),
         ServiceJob(
             "Custom Furniture Assembly",
@@ -177,19 +180,19 @@ SERVICE_JOBS: dict[str, list[ServiceJob]] = {
             "Interior Wall Painting",
             "Full or touch-up painting for bedrooms, living rooms, and ceilings.",
             3000,
-            PriceType.starting_from,
+            price_type=PriceType.starting_from,
         ),
         ServiceJob(
             "Exterior Wall Painting",
             "Weatherproof painting for outside walls and boundary walls.",
             5000,
-            PriceType.starting_from,
+            price_type=PriceType.starting_from,
         ),
         ServiceJob(
             "Waterproofing & Wall Repair",
             "Treating damp patches, cracks, and seepage before repainting.",
             2500,
-            PriceType.starting_from,
+            price_type=PriceType.starting_from,
         ),
     ],
     "Appliance Repair": [
@@ -197,19 +200,19 @@ SERVICE_JOBS: dict[str, list[ServiceJob]] = {
             "Washing Machine Repair",
             "Diagnosing and fixing drainage, spinning, or power issues.",
             800,
-            PriceType.starting_from,
+            price_type=PriceType.starting_from,
         ),
         ServiceJob(
             "Refrigerator Repair",
             "Fixing cooling problems, unusual noise, or leaks.",
             900,
-            PriceType.starting_from,
+            price_type=PriceType.starting_from,
         ),
         ServiceJob(
             "Microwave & Oven Repair",
             "Repairing heating and control issues on microwaves and ovens.",
             700,
-            PriceType.starting_from,
+            price_type=PriceType.starting_from,
         ),
     ],
     "Laundry": [
@@ -217,13 +220,13 @@ SERVICE_JOBS: dict[str, list[ServiceJob]] = {
             "Wash & Fold",
             "Everyday clothes washed, dried, and neatly folded, ready to put away.",
             300,
-            PriceType.starting_from,
+            price_type=PriceType.starting_from,
         ),
         ServiceJob(
             "Dry Cleaning",
             "Professional cleaning for suits, sarees, woollens, and other delicate garments.",
             400,
-            PriceType.starting_from,
+            price_type=PriceType.starting_from,
         ),
         ServiceJob(
             "Ironing & Pressing",
@@ -241,7 +244,7 @@ SERVICE_JOBS: dict[str, list[ServiceJob]] = {
             "Termite Treatment",
             "Targeted treatment for termite infestations in wooden furniture and structures.",
             3500,
-            PriceType.starting_from,
+            price_type=PriceType.starting_from,
         ),
         ServiceJob(
             "Rodent Control",

@@ -222,6 +222,10 @@ app.add_middleware(
 os.makedirs(settings.upload_dir, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads")
 
+# Job photos are bundled into the Flutter app (assets/service-jobs/) and
+# looked up there by job name, so the API no longer serves them itself —
+# there used to be a "/static/service-jobs" mount here for that.
+
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception):

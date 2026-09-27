@@ -354,7 +354,8 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                       _ServiceHeroImage(
                         categoryName: serviceCategory,
                         icon: _iconFor(serviceCategory),
-                        height: 120,
+                        height: 220,
+                        jobName: job?.name,
                       ),
                       const SizedBox(height: 16),
                       Text(jobTitle ?? serviceCategory,
@@ -1131,6 +1132,7 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                           subtitle: _searchResults[index].job != null ? _searchResults[index].category : null,
                           icon: _iconFor(_searchResults[index].category),
                           rating: _ratingFor(_searchResults[index].category),
+                          jobName: _searchResults[index].job?.name,
                           onTap: () {
                             final result = _searchResults[index];
                             if (result.job != null) {
@@ -1291,12 +1293,19 @@ class _ServiceListTile extends StatelessWidget {
   final ServiceRating? rating;
   final VoidCallback onTap;
 
+  /// Name of the specific job this tile represents — set only when this
+  /// tile is a job (a "subcategory") rather than a whole service category,
+  /// e.g. a job hit in search results. Null keeps the plain category icon
+  /// this tile has always shown.
+  final String? jobName;
+
   const _ServiceListTile({
     required this.title,
     required this.icon,
     required this.onTap,
     this.subtitle,
     this.rating,
+    this.jobName,
   });
 
   @override
@@ -1312,7 +1321,9 @@ class _ServiceListTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Container(
+            jobName != null
+                ? _JobThumbnail(jobName: jobName!, icon: icon, size: 52)
+                : Container(
               width: 52,
               height: 52,
               decoration: const BoxDecoration(color: kLightGreenBg, shape: BoxShape.circle),
@@ -1353,6 +1364,51 @@ class _ServiceListTile extends StatelessWidget {
   }
 }
 
+/// Bundled photo for a specific job (a "subcategory"), keyed by the job's
+/// exact name — same idea as the per-category hero images in
+/// `assets/services/`, just in their own `assets/service-jobs/` folder and
+/// keyed by job name rather than derived from it, since a curated photo's
+/// filename doesn't follow a fixed pattern the way a category slug does.
+///
+/// Not every job has a photo yet — [_JobThumbnail] and [_ServiceHeroImage]
+/// fall back to a plain icon for any job not listed here. Add a new job's
+/// entry here once its photo is dropped into `assets/service-jobs/` and
+/// declared in pubspec.yaml.
+const Map<String, String> _jobAssetPaths = {
+  // Cleaning
+  'Room Cleaning': 'assets/service-jobs/room_cleaning.png',
+  'Deep House Cleaning': 'assets/service-jobs/deep_cleaning.png',
+  'Bathroom & Kitchen Cleaning': 'assets/service-jobs/bathroom_kitchen_cleaning.png',
+  'Sofa & Carpet Cleaning': 'assets/service-jobs/sofa_carpet_cleaning.png',
+  // Plumbing
+  'Leak & Pipe Repair': 'assets/service-jobs/leak_and_pipe_repair.png',
+  'Tap & Fixture Installation': 'assets/service-jobs/tap_installation.png',
+  'Water Tank Cleaning': 'assets/service-jobs/water_tank_cleaning.png',
+  // Electrical
+  'Fan Installation': 'assets/service-jobs/fan_installation.png',
+  'Switchboard & Socket Repair': 'assets/service-jobs/switchboard_and_socket_repair.png',
+  'Light Fitting Installation': 'assets/service-jobs/light_fitting.png',
+  'Wiring & Rewiring': 'assets/service-jobs/wiring.png',
+  // Carpentry
+  'Furniture Repair': 'assets/service-jobs/furniture_repair.png',
+  'Door & Window Fitting': 'assets/service-jobs/door_fitting.png',
+  'Custom Furniture Assembly': 'assets/service-jobs/custom_furniture.png',
+  // Painting
+  'Interior Wall Painting': 'assets/service-jobs/interior_wall_painting.png',
+  'Exterior Wall Painting': 'assets/service-jobs/exterior_wall_painting.png',
+  'Waterproofing & Wall Repair': 'assets/service-jobs/waterproofing.png',
+  // Appliance Repair
+  'Washing Machine Repair': 'assets/service-jobs/washing_machine_repair.png',
+  'Refrigerator Repair': 'assets/service-jobs/refrigerator_repair.png',
+  'Microwave & Oven Repair': 'assets/service-jobs/microwave_repair.png',
+  // Laundry
+  'Wash & Fold': 'assets/service-jobs/wash_and_fold.png',
+  'Dry Cleaning': 'assets/service-jobs/dry_cleaning.png',
+  'Ironing & Pressing': 'assets/service-jobs/ironing.png',
+  // Pest Control — no bundled photos yet; falls back to the category
+  // banner / icon tile until photos are added.
+};
+
 /// Banner photo for a service, loaded from `assets/services/<service>.jpg`
 /// (e.g. Cleaning -> cleaning.jpg, Appliance Repair -> appliance_repair.jpg,
 /// Pest Control -> pest_control.jpg). If a photo is missing, it falls
@@ -1362,10 +1418,16 @@ class _ServiceHeroImage extends StatelessWidget {
   final IconData icon;
   final double height;
 
+  /// Name of the specific job being shown, if any — looked up in
+  /// [_jobAssetPaths] for a curated bundled photo. Takes priority over the
+  /// generic category shot when the job has one.
+  final String? jobName;
+
   const _ServiceHeroImage({
     required this.categoryName,
     required this.icon,
     this.height = 160,
+    this.jobName,
   });
 
   static String pathFor(String categoryName) {
@@ -1383,16 +1445,70 @@ class _ServiceHeroImage extends StatelessWidget {
       alignment: Alignment.center,
       child: Icon(icon, size: 48, color: kPrimaryGreen),
     );
+    final categoryImage = Image.asset(
+      pathFor(categoryName),
+      fit: BoxFit.cover,
+      errorBuilder: (_, _, _) => fallback,
+    );
+    final jobAssetPath = jobName != null ? _jobAssetPaths[jobName] : null;
+    final image = jobAssetPath != null
+        ? Image.asset(
+      jobAssetPath,
+      fit: BoxFit.cover,
+      errorBuilder: (_, _, _) => categoryImage,
+    )
+        : categoryImage;
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
       child: SizedBox(
         width: double.infinity,
         height: height,
-        child: Image.asset(
-          pathFor(categoryName),
-          fit: BoxFit.cover,
-          errorBuilder: (_, _, _) => fallback,
-        ),
+        child: image,
+      ),
+    );
+  }
+}
+
+/// A service job's own image, shown consistently wherever a specific job
+/// (a "subcategory") is listed on its own — the jobs list under a
+/// category, and job hits in search results.
+///
+/// Prefers a curated bundled photo (see [_jobAssetPaths]) when the job has
+/// one; otherwise falls back to a plain icon tile — the same layering
+/// [_ServiceHeroImage] uses for the larger hero version of the same image.
+class _JobThumbnail extends StatelessWidget {
+  final String jobName;
+  final IconData icon;
+  final double size;
+
+  const _JobThumbnail({
+    required this.jobName,
+    required this.icon,
+    this.size = 44,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = BorderRadius.circular(size / 3.5);
+    final fallback = Container(
+      decoration: BoxDecoration(color: kLightGreenBg, borderRadius: radius),
+      alignment: Alignment.center,
+      child: Icon(icon, color: kPrimaryGreen, size: size * 0.5),
+    );
+    final jobAssetPath = _jobAssetPaths[jobName];
+    final image = jobAssetPath != null
+        ? Image.asset(
+      jobAssetPath,
+      fit: BoxFit.cover,
+      errorBuilder: (_, _, _) => fallback,
+    )
+        : fallback;
+    return ClipRRect(
+      borderRadius: radius,
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: image,
       ),
     );
   }
@@ -1455,7 +1571,7 @@ class _ServiceJobsPage extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          _ServiceHeroImage(categoryName: categoryName, icon: icon),
+          _ServiceHeroImage(categoryName: categoryName, icon: icon, height: 220),
           const SizedBox(height: 16),
           if (rating != null) ...[
             Text(
@@ -1502,11 +1618,9 @@ class _ServiceJobsPage extends StatelessWidget {
                     // the booking sheet, so this list stays scannable.
                     child: Row(
                       children: [
-                        Container(
-                          width: 44,
-                          height: 44,
-                          decoration: const BoxDecoration(color: kLightGreenBg, shape: BoxShape.circle),
-                          child: const Icon(Icons.build_outlined, color: kPrimaryGreen),
+                        _JobThumbnail(
+                          jobName: job.name,
+                          icon: Icons.build_outlined,
                         ),
                         const SizedBox(width: 14),
                         Expanded(
