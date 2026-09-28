@@ -5,12 +5,14 @@ import '../models/booking.dart';
 import '../models/service_job.dart';
 import '../services/booking_service.dart';
 import '../services/payment_service.dart';
-import 'booking_timeline.dart';
 import 'provider_navigation_map.dart';
 
-/// Full detail view for one of the provider's own bookings — customer info,
-/// address, notes, timestamps, the status timeline, and the accept/decline/
-/// journey/complete actions. Mirrors [BookingDetailsPage] (the customer-side
+/// Full detail view for one of the provider's own bookings — customer
+/// name, status, price, and the accept/decline/journey/complete actions
+/// are shown up front; the customer's phone number, address, date/time,
+/// problem description, notes, and when the request was made sit behind
+/// the "View Details" toggle so the page doesn't dump everything on the
+/// provider at once. Mirrors [BookingDetailsPage] (the customer-side
 /// equivalent) in layout, spacing, and button styling; only the information
 /// shown and the available actions differ, since a provider needs to see who
 /// booked them (and their phone number) and needs to move the booking through
@@ -46,6 +48,12 @@ class ProviderBookingDetailsPage extends StatefulWidget {
 class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage> {
   late Booking _booking;
   bool _updating = false;
+
+  /// Whether the "View Details" section (phone, address, date/time,
+  /// problem description, notes, and when the request was made) is
+  /// expanded. Starts collapsed so the page opens on just the basics —
+  /// customer name, status, price, and the accept/decline/journey actions.
+  bool _showDetails = false;
 
   @override
   void initState() {
@@ -233,18 +241,6 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
                 style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
               ),
             ],
-            if (b.status != 'rejected' && b.status != 'cancelled') ...[
-              const SizedBox(height: 20),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade200),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: BookingTimeline(status: b.status),
-              ),
-            ],
             // The navigation map: the customer's pin shows as soon as the
             // job is accepted; the provider's own live position and the
             // route between the two join it once they're on the way, and
@@ -267,8 +263,6 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
               ),
             ],
             const SizedBox(height: 20),
-            if (b.customerPhone != null && b.customerPhone!.isNotEmpty)
-              _DetailRow(icon: Icons.phone_outlined, label: 'Phone', value: b.customerPhone!),
             // What this job was booked at. The provider sees the same
             // figure the customer agreed to, so there's no discrepancy to
             // argue about on the doorstep.
@@ -294,23 +288,29 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
                 value: 'Rs. ${(b.totalAmount ?? ((b.price ?? 0) + b.extraCharges)).toStringAsFixed(2)}',
               ),
             ],
-            _DetailRow(icon: Icons.location_on_outlined, label: 'Address', value: b.address),
-            if (b.preferredDate != null)
-              _DetailRow(
-                icon: Icons.event_outlined,
-                label: 'Date & Time',
-                value: '${_formatDate(b.preferredDate!)}'
-                    ' · ${TimeOfDay.fromDateTime(b.preferredDate!).format(context)}',
-              ),
-            if (b.problemDescription != null && b.problemDescription!.isNotEmpty)
-              _DetailRow(
-                icon: Icons.report_problem_outlined,
-                label: 'Problem Description',
-                value: b.problemDescription!,
-              ),
-            if (b.notes != null && b.notes!.isNotEmpty)
-              _DetailRow(icon: Icons.notes_rounded, label: 'Notes', value: b.notes!),
-            _DetailRow(icon: Icons.access_time_rounded, label: 'Requested On', value: _formatDate(b.createdAt)),
+            const SizedBox(height: 4),
+            if (_showDetails) ...[
+              const SizedBox(height: 8),
+              if (b.customerPhone != null && b.customerPhone!.isNotEmpty)
+                _DetailRow(icon: Icons.phone_outlined, label: 'Phone', value: b.customerPhone!),
+              _DetailRow(icon: Icons.location_on_outlined, label: 'Address', value: b.address),
+              if (b.preferredDate != null)
+                _DetailRow(
+                  icon: Icons.event_outlined,
+                  label: 'Date & Time',
+                  value: '${_formatDate(b.preferredDate!)}'
+                      ' · ${TimeOfDay.fromDateTime(b.preferredDate!).format(context)}',
+                ),
+              if (b.problemDescription != null && b.problemDescription!.isNotEmpty)
+                _DetailRow(
+                  icon: Icons.report_problem_outlined,
+                  label: 'Problem Description',
+                  value: b.problemDescription!,
+                ),
+              if (b.notes != null && b.notes!.isNotEmpty)
+                _DetailRow(icon: Icons.notes_rounded, label: 'Notes', value: b.notes!),
+              _DetailRow(icon: Icons.access_time_rounded, label: 'Requested On', value: _formatDate(b.createdAt)),
+            ],
             if (b.status == 'pending') ...[
               // An unverified provider can still decline a request (that
               // just gives it up, no harm done) but can't accept one — an
@@ -446,6 +446,20 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
                 ),
               ),
             ],
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => setState(() => _showDetails = !_showDetails),
+                icon: Icon(_showDetails ? Icons.expand_less_rounded : Icons.expand_more_rounded, size: 18),
+                label: Text(_showDetails ? 'Hide Details' : 'View Details'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: kDarkText,
+                  side: BorderSide(color: Colors.grey.shade300),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            ),
           ],
         ),
       ),

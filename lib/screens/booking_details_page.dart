@@ -11,8 +11,11 @@ import 'esewa_payment_page.dart';
 import 'booking_timeline.dart';
 import 'customer_navigation_map.dart';
 
-/// Full detail view for one of the customer's own bookings — address,
-/// notes, timestamps, the status timeline, and the cancel/rate actions.
+/// Full detail view for one of the customer's own bookings — status
+/// timeline, price/payment, and the cancel/rate actions are shown up
+/// front; address, date/time, problem description, notes, and when the
+/// request was made sit behind the "View Details" toggle so the page
+/// doesn't dump everything on the customer at once.
 /// The booking list only shows the basics and links here for everything
 /// else. This page keeps its own local copy of the booking so cancel/rate
 /// reflect immediately without waiting on the list to reload; the list
@@ -38,6 +41,12 @@ class BookingDetailsPage extends StatefulWidget {
 
 class _BookingDetailsPageState extends State<BookingDetailsPage> {
   late Booking _booking;
+
+  /// Whether the "View Details" section (address, date/time, problem
+  /// description, notes, and when the request was made) is expanded.
+  /// Starts collapsed so the page opens on just the basics — title,
+  /// status, price/payment, and the cancel/rate actions.
+  bool _showDetails = false;
 
   Timer? _pollTimer;
   static const _pollInterval = Duration(seconds: 4);
@@ -381,23 +390,27 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                   ),
                 ),
             ],
-            _DetailRow(icon: Icons.location_on_outlined, label: 'Address', value: b.address),
-            if (b.preferredDate != null)
-              _DetailRow(
-                icon: Icons.event_outlined,
-                label: 'Date & Time',
-                value: '${_formatDate(b.preferredDate!)}'
-                    ' · ${TimeOfDay.fromDateTime(b.preferredDate!).format(context)}',
-              ),
-            if (b.problemDescription != null && b.problemDescription!.isNotEmpty)
-              _DetailRow(
-                icon: Icons.report_problem_outlined,
-                label: 'Problem Description',
-                value: b.problemDescription!,
-              ),
-            if (b.notes != null && b.notes!.isNotEmpty)
-              _DetailRow(icon: Icons.notes_rounded, label: 'Notes', value: b.notes!),
-            _DetailRow(icon: Icons.access_time_rounded, label: 'Requested On', value: _formatDate(b.createdAt)),
+            const SizedBox(height: 4),
+            if (_showDetails) ...[
+              const SizedBox(height: 8),
+              _DetailRow(icon: Icons.location_on_outlined, label: 'Address', value: b.address),
+              if (b.preferredDate != null)
+                _DetailRow(
+                  icon: Icons.event_outlined,
+                  label: 'Date & Time',
+                  value: '${_formatDate(b.preferredDate!)}'
+                      ' · ${TimeOfDay.fromDateTime(b.preferredDate!).format(context)}',
+                ),
+              if (b.problemDescription != null && b.problemDescription!.isNotEmpty)
+                _DetailRow(
+                  icon: Icons.report_problem_outlined,
+                  label: 'Problem Description',
+                  value: b.problemDescription!,
+                ),
+              if (b.notes != null && b.notes!.isNotEmpty)
+                _DetailRow(icon: Icons.notes_rounded, label: 'Notes', value: b.notes!),
+              _DetailRow(icon: Icons.access_time_rounded, label: 'Requested On', value: _formatDate(b.createdAt)),
+            ],
             if (b.status == 'pending') ...[
               const SizedBox(height: 8),
               SizedBox(
@@ -450,6 +463,20 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                     style: TextStyle(fontSize: 13, color: Colors.grey.shade700, fontStyle: FontStyle.italic)),
               ],
             ],
+            const SizedBox(height: 20),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => setState(() => _showDetails = !_showDetails),
+                icon: Icon(_showDetails ? Icons.expand_less_rounded : Icons.expand_more_rounded, size: 18),
+                label: Text(_showDetails ? 'Hide Details' : 'View Details'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: kDarkText,
+                  side: BorderSide(color: Colors.grey.shade300),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            ),
           ],
         ),
       ),
