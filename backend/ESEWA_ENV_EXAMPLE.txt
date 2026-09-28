@@ -1,0 +1,12 @@
+# eSewa ePay v2 UAT
+ESEWA_ENVIRONMENT=uat
+ESEWA_PRODUCT_CODE=EPAYTEST
+ESEWA_SECRET_KEY=8gBm/:&EnhH.1/q(
+# Must be publicly reachable by eSewa. Use your HTTPS domain or a tunnel for local UAT.
+ESEWA_PUBLIC_BASE_URL=https://YOUR-PUBLIC-HTTPS-HOST
+ESEWA_SIGNED_FIELD_NAMES=total_amount,transaction_uuid,product_code
+
+# Production:
+# ESEWA_ENVIRONMENT=production
+# ESEWA_PRODUCT_CODE=<your production merchant product code>
+# ESEWA_SECRET_KEY=<your production merchant secret>

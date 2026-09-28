@@ -21,6 +21,11 @@ class Booking {
   /// Server-formatted display string for [price], e.g. "Rs. 600" or
   /// "From Rs. 2,500".
   final String? priceLabel;
+  final double extraCharges;
+  final String? extraChargeNote;
+  final double? totalAmount;
+  final String paymentStatus; // unpaid | pending | paid | failed | cancelled | refunded
+  final String? paymentReference;
   final String address;
   final double? latitude;
   final double? longitude;
@@ -56,6 +61,11 @@ class Booking {
     this.price,
     this.priceType,
     this.priceLabel,
+    this.extraCharges = 0,
+    this.extraChargeNote,
+    this.totalAmount,
+    this.paymentStatus = 'unpaid',
+    this.paymentReference,
     this.latitude,
     this.longitude,
     this.problemDescription,
@@ -97,6 +107,11 @@ class Booking {
           ? PriceType.fromJson(json['price_type'] as String)
           : null,
       priceLabel: json['price_label'] as String?,
+      extraCharges: (json['extra_charges'] as num?)?.toDouble() ?? 0,
+      extraChargeNote: json['extra_charge_note'] as String?,
+      totalAmount: (json['total_amount'] as num?)?.toDouble(),
+      paymentStatus: json['payment_status'] as String? ?? 'unpaid',
+      paymentReference: json['payment_reference'] as String?,
       address: json['address'] as String,
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),

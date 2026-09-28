@@ -1,5 +1,10 @@
+import json
+import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+
+from fastapi.responses import HTMLResponse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
@@ -7,12 +12,22 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
 from app.constants import find_service_job, format_price_label
+from app.config import settings
+from app.payments import (
+    PaymentGatewayError,
+    decode_response,
+    money,
+    sign_fields,
+    status_check,
+    verify_response_signature,
+)
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import (
     Booking,
     BookingStatus,
     ProviderProfile,
+    PaymentAttempt,
     Rating,
     User,
     UserRole,
@@ -23,6 +38,9 @@ from app.schemas import (
     BookingLocationUpdateRequest,
     BookingOut,
     BookingStatusUpdateRequest,
+    ExtraChargeUpdateRequest,
+    EsewaPaymentInitOut,
+    EsewaVerifyRequest,
     RatingCreateRequest,
 )
 
@@ -33,6 +51,8 @@ from app.schemas import (
 # once the booking is marked 'completed', passing through 'arrived' in
 # between without interruption.
 _LOCATION_SHARING_STATUSES = (BookingStatus.on_the_way, BookingStatus.arrived)
+
+logger = logging.getLogger("uvicorn.error")
 
 router = APIRouter(prefix="/api/bookings", tags=["bookings"])
 
@@ -60,6 +80,12 @@ def _to_booking_out(
         # current catalogue — a booking always shows the price it was made
         # at, even if that job has since been repriced.
         price_label=format_price_label(booking.price, booking.price_type),
+        extra_charges=float(booking.extra_charges or 0),
+        extra_charge_note=booking.extra_charge_note,
+        total_amount=(float(Decimal(str(booking.price or 0)) + Decimal(str(booking.extra_charges or 0)))
+                      if booking.price is not None else None),
+        payment_status=booking.payment_status,
+        payment_reference=booking.payment_reference,
         address=booking.address,
         latitude=booking.latitude,
         longitude=booking.longitude,
@@ -341,6 +367,11 @@ def update_booking_status(
         elif booking.status == BookingStatus.on_the_way and new_status == BookingStatus.arrived:
             allowed = True
         elif booking.status == BookingStatus.arrived and new_status == BookingStatus.completed:
+            if booking.payment_status != "paid":
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail="Payment must be completed before the provider can mark this booking as completed.",
+                )
             allowed = True
     elif is_customer:
         if booking.status == BookingStatus.pending and new_status == BookingStatus.cancelled:
@@ -373,6 +404,307 @@ def update_booking_status(
     # the separate /rating endpoint below) never exists yet at the moment
     # a booking *first* transitions to 'completed' here — nothing to fetch.
     return _to_booking_out(booking, customer.full_name, customer.phone)
+
+
+PENDING_PAYMENT_TTL = timedelta(minutes=10)
+
+
+def _expire_stale_pending(db: Session, booking: Booking) -> None:
+    """Release a payment that was started but never finished.
+
+    A booking is marked "pending" the moment the customer taps Pay. If the
+    app crashes, the request fails, or the customer walks away, nothing ever
+    clears it and the provider is blocked from editing charges forever.
+    """
+    if booking.payment_status != "pending":
+        return
+    updated = booking.payment_updated_at
+    if updated is not None:
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) - updated < PENDING_PAYMENT_TTL:
+            return
+    db.query(PaymentAttempt).filter(
+        PaymentAttempt.booking_id == booking.id,
+        PaymentAttempt.status == "pending",
+    ).update({"status": "cancelled"})
+    booking.payment_status = "cancelled"
+    booking.payment_transaction_uuid = None
+    booking.payment_updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(booking)
+
+
+@router.patch("/{booking_id}/charges", response_model=BookingOut)
+def update_booking_charges(
+    booking_id: uuid.UUID,
+    payload: ExtraChargeUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Provider sets the additional amount before the customer pays."""
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found.")
+    if current_user.role != UserRole.provider or booking.provider_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the assigned provider can add charges.")
+    if booking.status not in (BookingStatus.accepted, BookingStatus.on_the_way, BookingStatus.arrived):
+        raise HTTPException(status_code=400, detail="Additional charges can only be added to an active booking.")
+    if booking.payment_status == "paid":
+        raise HTTPException(status_code=400, detail="Additional charges cannot be changed after payment.")
+    _expire_stale_pending(db, booking)
+    if booking.payment_status == "pending":
+        raise HTTPException(status_code=409, detail="A payment is already in progress. Finish or cancel it before changing charges.")
+
+    booking.extra_charges = Decimal(str(payload.extra_charges)).quantize(Decimal("0.01"))
+    booking.extra_charge_note = payload.note.strip() if payload.note and payload.note.strip() else None
+    db.commit()
+    db.refresh(booking)
+    customer = db.query(User).filter(User.id == booking.customer_id).first()
+    return _to_booking_out(booking, customer.full_name, customer.phone)
+
+
+def _get_customer_booking(db: Session, booking_id: uuid.UUID, current_user: User) -> Booking:
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found.")
+    if current_user.role != UserRole.customer or booking.customer_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the customer who owns this booking can pay for it.")
+    return booking
+
+
+def _apply_esewa_response(db: Session, attempt: PaymentAttempt, response_data: dict) -> PaymentAttempt:
+    """Verify the signed response and eSewa's authoritative status."""
+    if not verify_response_signature(response_data):
+        raise HTTPException(status_code=400, detail="Invalid eSewa response signature.")
+
+    booking = db.query(Booking).filter(Booking.id == attempt.booking_id).with_for_update().first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found.")
+
+    transaction_uuid = str(response_data.get("transaction_uuid", ""))
+    product_code = str(response_data.get("product_code", ""))
+    try:
+        # eSewa may format the amount with thousands separators ("1,000.0").
+        total_amount = Decimal(str(response_data.get("total_amount", "0")).replace(",", "")).quantize(Decimal("0.01"))
+    except Exception:
+        raise HTTPException(status_code=400, detail="eSewa returned an invalid amount.")
+    expected_total = (Decimal(str(booking.price or 0)) + Decimal(str(booking.extra_charges or 0))).quantize(Decimal("0.01"))
+
+    if transaction_uuid != attempt.transaction_uuid or product_code != settings.esewa_product_code:
+        raise HTTPException(status_code=400, detail="eSewa transaction does not match this booking.")
+    if total_amount != expected_total or total_amount != attempt.amount:
+        raise HTTPException(status_code=400, detail="eSewa amount does not match the booking total.")
+
+    try:
+        status_response = status_check(transaction_uuid, total_amount)
+    except PaymentGatewayError:
+        logger.exception("eSewa status check failed for %s", transaction_uuid)
+        raise HTTPException(
+            status_code=502,
+            detail="Could not confirm the payment with eSewa yet. Please tap Retry in a moment.",
+        )
+    provider_status = str(status_response.get("status", "")).upper()
+    returned_product = status_response.get("product_code") or status_response.get("scd")
+    if returned_product is not None and str(returned_product) != settings.esewa_product_code:
+        raise HTTPException(status_code=400, detail="eSewa status response has the wrong product code.")
+    status_txn = status_response.get("transaction_uuid")
+    if status_txn is not None and str(status_txn) != transaction_uuid:
+        raise HTTPException(status_code=400, detail="eSewa status response has the wrong transaction.")
+    status_amount = status_response.get("total_amount") or status_response.get("totalAmount")
+    if status_amount is not None and Decimal(str(status_amount).replace(",", "")).quantize(Decimal("0.01")) != total_amount:
+        raise HTTPException(status_code=400, detail="eSewa status response has the wrong amount.")
+
+    attempt.raw_response = json.dumps({"redirect": response_data, "status_check": status_response})
+    attempt.reference = (status_response.get("ref_id") or status_response.get("refId")
+                         or response_data.get("transaction_code"))
+    attempt.status = {
+        "COMPLETE": "paid",
+        "CANCELED": "cancelled",
+        "FULL_REFUND": "refunded",
+        "PARTIAL_REFUND": "refunded",
+        "PENDING": "pending",
+        "AMBIGUOUS": "pending",
+        "NOT_FOUND": "failed",
+    }.get(provider_status, "failed")
+
+    if attempt.status == "paid":
+        booking.payment_status = "paid"
+        booking.payment_transaction_uuid = attempt.transaction_uuid
+        booking.payment_reference = attempt.reference
+    elif booking.payment_status != "paid":
+        booking.payment_status = attempt.status
+        if attempt.status in {"cancelled", "failed"}:
+            booking.payment_transaction_uuid = None
+    booking.payment_updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(attempt)
+    return attempt
+
+
+@router.post("/{booking_id}/payment/esewa/initiate", response_model=EsewaPaymentInitOut)
+def initiate_esewa_payment(
+    booking_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    booking = _get_customer_booking(db, booking_id, current_user)
+    if booking.price is None:
+        raise HTTPException(status_code=400, detail="This booking does not have a payable price.")
+    if booking.status in (BookingStatus.rejected, BookingStatus.cancelled, BookingStatus.completed):
+        raise HTTPException(status_code=400, detail="This booking is no longer payable.")
+    if booking.payment_status == "paid":
+        raise HTTPException(status_code=409, detail="This booking has already been paid.")
+
+    # A new attempt supersedes any earlier unfinished one for this booking.
+    db.query(PaymentAttempt).filter(
+        PaymentAttempt.booking_id == booking.id,
+        PaymentAttempt.status == "pending",
+    ).update({"status": "cancelled"})
+
+    total = (Decimal(str(booking.price)) + Decimal(str(booking.extra_charges or 0))).quantize(Decimal("0.01"))
+    transaction_uuid = f"{booking.id.hex[:20]}-{uuid.uuid4().hex[:12]}"
+    fields = {
+        # eSewa requires total_amount == amount + tax_amount +
+        # product_service_charge + product_delivery_charge (else ES704), so
+        # "amount" must already include any extra charges.
+        "amount": money(total),
+        "tax_amount": "0",
+        "total_amount": money(total),
+        "product_service_charge": "0",
+        "product_delivery_charge": "0",
+        "product_code": settings.esewa_product_code,
+        "transaction_uuid": transaction_uuid,
+        "success_url": f"{settings.esewa_public_base_url.rstrip('/')}/api/bookings/esewa/success?booking_id={booking.id}&transaction_uuid={transaction_uuid}",
+        "failure_url": f"{settings.esewa_public_base_url.rstrip('/')}/api/bookings/esewa/failure?booking_id={booking.id}&transaction_uuid={transaction_uuid}",
+        "signed_field_names": settings.esewa_signed_field_names,
+    }
+    fields["signature"] = sign_fields(fields)
+
+    attempt = PaymentAttempt(
+        booking_id=booking.id,
+        transaction_uuid=transaction_uuid,
+        amount=total,
+        status="pending",
+    )
+    db.add(attempt)
+    booking.payment_status = "pending"
+    booking.payment_transaction_uuid = transaction_uuid
+    booking.payment_updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return EsewaPaymentInitOut(
+        booking_id=booking.id,
+        transaction_uuid=transaction_uuid,
+        amount=float(booking.price),
+        extra_charges=float(booking.extra_charges or 0),
+        total_amount=float(total),
+        form_url=settings.esewa_form_url,
+        fields=fields,
+    )
+
+
+@router.post("/{booking_id}/payment/esewa/verify", response_model=BookingOut)
+def verify_esewa_payment(
+    booking_id: uuid.UUID,
+    payload: EsewaVerifyRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    booking = _get_customer_booking(db, booking_id, current_user)
+    try:
+        response_data = decode_response(payload.data)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid eSewa payment response.")
+
+    txn = str(response_data.get("transaction_uuid", ""))
+    attempt = db.query(PaymentAttempt).filter(
+        PaymentAttempt.booking_id == booking.id,
+        PaymentAttempt.transaction_uuid == txn,
+    ).first()
+    if not attempt:
+        raise HTTPException(status_code=404, detail="Payment attempt not found.")
+
+    _apply_esewa_response(db, attempt, response_data)
+    db.refresh(booking)
+    return _to_booking_out(booking, current_user.full_name, current_user.phone)
+
+
+@router.post("/{booking_id}/payment/esewa/cancel", response_model=BookingOut)
+def cancel_esewa_payment(
+    booking_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    booking = _get_customer_booking(db, booking_id, current_user)
+    if booking.payment_status == "paid":
+        raise HTTPException(status_code=409, detail="A successful payment cannot be cancelled here.")
+    if booking.payment_transaction_uuid:
+        attempt = db.query(PaymentAttempt).filter(
+            PaymentAttempt.transaction_uuid == booking.payment_transaction_uuid
+        ).first()
+        if attempt and attempt.status == "pending":
+            attempt.status = "cancelled"
+    booking.payment_status = "cancelled"
+    booking.payment_transaction_uuid = None
+    booking.payment_updated_at = datetime.now(timezone.utc)
+    db.commit()
+    return _to_booking_out(booking, current_user.full_name, current_user.phone)
+
+
+def _esewa_callback_html(title: str, message: str) -> HTMLResponse:
+    return HTMLResponse(f"""<!doctype html><html><body style='font-family:sans-serif;padding:32px'><h2>{title}</h2><p>{message}</p><p>You can return to GharSewa.</p></body></html>""")
+
+
+@router.get("/esewa/success", response_class=HTMLResponse, include_in_schema=False)
+def esewa_success_callback(
+    booking_id: uuid.UUID,
+    transaction_uuid: str,
+    data: str | None = None,
+    db: Session = Depends(get_db),
+):
+    """Server callback/fallback: verify a success redirect even if the app is closed."""
+    # eSewa appends "?data=..." to success_url even when it already has a
+    # query string, so the data can end up glued onto transaction_uuid.
+    if "?data=" in transaction_uuid:
+        transaction_uuid, _, embedded = transaction_uuid.partition("?data=")
+        data = data or embedded
+    if not data:
+        return _esewa_callback_html("Payment received", "The payment response is being verified.")
+    try:
+        response_data = decode_response(data)
+        attempt = db.query(PaymentAttempt).filter(
+            PaymentAttempt.booking_id == booking_id,
+            PaymentAttempt.transaction_uuid == transaction_uuid,
+        ).first()
+        if attempt:
+            _apply_esewa_response(db, attempt, response_data)
+            return _esewa_callback_html("Payment verified", "Your GharSewa payment was verified successfully.")
+    except Exception:
+        db.rollback()
+    return _esewa_callback_html("Payment verification pending", "Please return to GharSewa and check the payment status.")
+
+
+@router.get("/esewa/failure", response_class=HTMLResponse, include_in_schema=False)
+def esewa_failure_callback(
+    booking_id: uuid.UUID,
+    transaction_uuid: str,
+    db: Session = Depends(get_db),
+):
+    transaction_uuid = transaction_uuid.split("?")[0]
+    attempt = db.query(PaymentAttempt).filter(
+        PaymentAttempt.booking_id == booking_id,
+        PaymentAttempt.transaction_uuid == transaction_uuid,
+    ).first()
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if attempt and attempt.status == "pending":
+        attempt.status = "failed"
+    if booking and booking.payment_status != "paid":
+        booking.payment_status = "failed"
+        booking.payment_transaction_uuid = None
+        booking.payment_updated_at = datetime.now(timezone.utc)
+    db.commit()
+    return _esewa_callback_html("Payment not completed", "The eSewa payment was cancelled or failed. No booking completion was recorded.")
 
 
 @router.post("/{booking_id}/rating", response_model=BookingOut, status_code=status.HTTP_201_CREATED)

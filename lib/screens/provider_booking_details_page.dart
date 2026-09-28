@@ -4,6 +4,7 @@ import '../main.dart';
 import '../models/booking.dart';
 import '../models/service_job.dart';
 import '../services/booking_service.dart';
+import '../services/payment_service.dart';
 import 'booking_timeline.dart';
 import 'provider_navigation_map.dart';
 
@@ -50,6 +51,77 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
   void initState() {
     super.initState();
     _booking = widget.booking;
+  }
+
+  Future<void> _editCharges() async {
+    final amountController = TextEditingController(
+      text: _booking.extraCharges > 0 ? _booking.extraCharges.toStringAsFixed(2) : '',
+    );
+    final noteController = TextEditingController(text: _booking.extraChargeNote ?? '');
+    final result = await showDialog<(double, String?)>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Additional charges'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: amountController,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'Extra charge (Rs.)'),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: noteController,
+              maxLength: 500,
+              decoration: const InputDecoration(labelText: 'Reason / note (optional)'),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () {
+              final amount = double.tryParse(amountController.text.trim());
+              if (amount == null || amount < 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Enter a valid non-negative amount.')),
+                );
+                return;
+              }
+              Navigator.pop(dialogContext, (amount, noteController.text.trim().isEmpty ? null : noteController.text.trim()));
+            },
+            style: FilledButton.styleFrom(backgroundColor: kPrimaryGreen),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    // Dispose after the dialog's closing animation has finished; disposing
+    // immediately leaves the dialog's TextFields listening to dead controllers.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      amountController.dispose();
+      noteController.dispose();
+    });
+    if (result == null) return;
+
+    setState(() => _updating = true);
+    try {
+      final updated = await PaymentService.updateCharges(
+        accessToken: widget.accessToken,
+        bookingId: _booking.id,
+        extraCharges: result.$1,
+        note: result.$2,
+      );
+      if (mounted) setState(() => _booking = updated);
+    } on PaymentServiceException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Colors.red.shade600),
+      );
+    } finally {
+      if (mounted) setState(() => _updating = false);
+    }
   }
 
   Future<void> _respond(String status) async {
@@ -208,6 +280,20 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
                     ? '${b.priceLabel!} · final price depends on the work needed'
                     : b.priceLabel!,
               ),
+            if (b.hasPrice) ...[
+              _DetailRow(
+                icon: Icons.add_card_outlined,
+                label: 'Additional charges',
+                value: b.extraCharges > 0
+                    ? 'Rs. ${b.extraCharges.toStringAsFixed(2)}${b.extraChargeNote != null ? ' · ${b.extraChargeNote}' : ''}'
+                    : 'None',
+              ),
+              _DetailRow(
+                icon: Icons.account_balance_wallet_outlined,
+                label: 'Customer total',
+                value: 'Rs. ${(b.totalAmount ?? ((b.price ?? 0) + b.extraCharges)).toStringAsFixed(2)}',
+              ),
+            ],
             _DetailRow(icon: Icons.location_on_outlined, label: 'Address', value: b.address),
             if (b.preferredDate != null)
               _DetailRow(
@@ -298,6 +384,23 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
                 ),
               ),
             ],
+            if ((b.status == 'accepted' || b.status == 'on_the_way' || b.status == 'arrived') &&
+                b.paymentStatus != 'paid') ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _updating ? null : _editCharges,
+                  icon: const Icon(Icons.add_card_outlined, size: 18),
+                  label: Text(b.extraCharges > 0 ? 'Update Additional Charges' : 'Add Additional Charges'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: kPrimaryGreen,
+                    side: BorderSide(color: kPrimaryGreen.withValues(alpha: 0.45)),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                ),
+              ),
+            ],
             if (b.status == 'accepted') ...[
               const SizedBox(height: 8),
               SizedBox(
@@ -333,13 +436,13 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
-                  onPressed: _updating ? null : () => _respond('completed'),
+                  onPressed: (b.paymentStatus == 'paid' && !_updating) ? () => _respond('completed') : null,
                   style: FilledButton.styleFrom(
                     backgroundColor: kPrimaryGreen,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
                   icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
-                  label: const Text('Mark as Completed'),
+                  label: Text(b.paymentStatus == 'paid' ? 'Mark as Completed' : 'Waiting for Customer Payment'),
                 ),
               ),
             ],

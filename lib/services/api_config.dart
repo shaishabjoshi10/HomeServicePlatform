@@ -17,3 +17,6 @@ const String apiBaseUrl = "http://192.168.1.75:8000";
 
 // Raj Hotspot
 // const String apiBaseUrl = "http://10.160.4.74:8000";
+
+// Without wifi
+// const String apiBaseUrl = 'http://127.0.0.1:8000';

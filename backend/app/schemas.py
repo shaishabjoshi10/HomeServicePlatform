@@ -287,6 +287,25 @@ class BookingCreateRequest(BaseModel):
         return self
 
 
+class ExtraChargeUpdateRequest(BaseModel):
+    extra_charges: float = Field(ge=0, le=1000000)
+    note: str | None = Field(default=None, max_length=500)
+
+
+class EsewaVerifyRequest(BaseModel):
+    data: str = Field(min_length=1)
+
+
+class EsewaPaymentInitOut(BaseModel):
+    booking_id: uuid.UUID
+    transaction_uuid: str
+    amount: float
+    extra_charges: float
+    total_amount: float
+    form_url: str
+    fields: dict[str, str]
+
+
 class BookingStatusUpdateRequest(BaseModel):
     status: BookingStatus
 
@@ -317,6 +336,11 @@ class BookingOut(BaseModel):
     price: float | None = None
     price_type: PriceType | None = None
     price_label: str | None = None
+    extra_charges: float = 0
+    extra_charge_note: str | None = None
+    total_amount: float | None = None
+    payment_status: str = "unpaid"
+    payment_reference: str | None = None
     address: str
     latitude: float | None
     longitude: float | None
@@ -352,18 +376,6 @@ class BookingOut(BaseModel):
 class RatingCreateRequest(BaseModel):
     stars: int = Field(ge=1, le=5)
     comment: str | None = Field(default=None, max_length=1000)
-
-
-class RatingOut(BaseModel):
-    id: uuid.UUID
-    booking_id: uuid.UUID
-    customer_id: uuid.UUID
-    service_category: str | None
-    stars: int
-    comment: str | None
-    created_at: datetime
-
-    model_config = {"from_attributes": True}
 
 
 class ServiceRatingOut(BaseModel):

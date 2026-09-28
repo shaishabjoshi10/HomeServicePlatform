@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     Numeric,
+    Index,
     String,
     Text,
     UniqueConstraint,
@@ -225,6 +226,40 @@ class Booking(Base):
     provider_latitude = Column(Float, nullable=True)
     provider_longitude = Column(Float, nullable=True)
     provider_location_updated_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Payment is separate from the booking lifecycle: a booking can be
+    # accepted/arrived before it is paid, and completion is blocked until
+    # payment_status == "paid".
+    extra_charges = Column(Numeric(10, 2), nullable=False, default=0, server_default="0")
+    extra_charge_note = Column(String(500), nullable=True)
+    payment_status = Column(String(20), nullable=False, default="unpaid", server_default="unpaid", index=True)
+    payment_transaction_uuid = Column(String(100), nullable=True, unique=True, index=True)
+    payment_reference = Column(String(100), nullable=True)
+    payment_updated_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class PaymentAttempt(Base):
+    """One eSewa transaction attempt for a booking.
+
+    Keeping attempts separately means a failed/cancelled transaction can be
+    retried without losing the previous transaction reference.
+    """
+
+    __tablename__ = "payment_attempts"
+    __table_args__ = (
+        UniqueConstraint("transaction_uuid", name="uq_payment_attempts_transaction_uuid"),
+        Index("ix_payment_attempts_booking_id", "booking_id"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    booking_id = Column(UUID(as_uuid=True), ForeignKey("bookings.id", ondelete="CASCADE"), nullable=False)
+    transaction_uuid = Column(String(100), nullable=False)
+    amount = Column(Numeric(10, 2), nullable=False)
+    status = Column(String(20), nullable=False, default="pending")
+    reference = Column(String(100), nullable=True)
+    raw_response = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

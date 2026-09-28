@@ -295,6 +295,13 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
     PickedLocation? pickedLocation = _defaultLocation;
     bool isSubmitting = false; // guards against double-tap firing two bookings
     bool isSubmitted = false; // true once the request succeeds; shows the brief confirmation
+    // Shown inline in the sheet itself (see the banner just above the submit
+    // button) rather than as a SnackBar on the page behind it — a SnackBar
+    // attached to the page's Scaffold is covered by this modal bottom sheet,
+    // so it only becomes visible once the sheet is dismissed (e.g. via the
+    // back button), which made a "no provider available" failure look like
+    // it silently did nothing until the customer backed out.
+    String? errorMessage;
 
     await showModalBottomSheet(
       context: context,
@@ -590,9 +597,9 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                                 if (value == null) return 'Select a time';
                                 final minutesSinceMidnight = value.hour * 60 + value.minute;
                                 const earliest = 8 * 60; // 8:00 AM
-                                const latest = 22 * 60; // 10:00 PM
+                                const latest = 17 * 60; // 5:00 PM
                                 if (minutesSinceMidnight < earliest || minutesSinceMidnight > latest) {
-                                  return 'Choose a time between 8:00 AM and 10:00 PM';
+                                  return 'Choose a time between 8:00 AM and 5:00 PM';
                                 }
                                 return null;
                               },
@@ -701,6 +708,31 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                           ),
                         ),
                       ),
+                      if (errorMessage != null) ...[
+                        const SizedBox(height: 16),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.red.shade200),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(Icons.error_outline, color: Colors.red.shade600, size: 20),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  errorMessage!,
+                                  style: TextStyle(color: Colors.red.shade700, fontSize: 13),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 24),
                       SizedBox(
                         width: double.infinity,
@@ -730,7 +762,10 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                               preferredTime!.hour,
                               preferredTime!.minute,
                             );
-                            setSheetState(() => isSubmitting = true);
+                            setSheetState(() {
+                              isSubmitting = true;
+                              errorMessage = null;
+                            });
                             try {
                               await BookingService.createBooking(
                                 accessToken: widget.accessToken,
@@ -760,28 +795,20 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                                 ),
                               );
                             } on BookingServiceException catch (e) {
-                              if (!context.mounted) return;
-                              setSheetState(() => isSubmitting = false);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(e.message),
-                                  backgroundColor: Colors.red.shade600,
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
+                              if (!sheetContext.mounted) return;
+                              setSheetState(() {
+                                isSubmitting = false;
+                                errorMessage = e.message;
+                              });
                             } catch (_) {
                               // Any other failure (timeout, bad response, etc.) still has to
                               // re-enable the button — otherwise it's stuck disabled forever
                               // with no way to retry.
-                              if (!context.mounted) return;
-                              setSheetState(() => isSubmitting = false);
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: const Text('Something went wrong. Please try again.'),
-                                  backgroundColor: Colors.red.shade600,
-                                  behavior: SnackBarBehavior.floating,
-                                ),
-                              );
+                              if (!sheetContext.mounted) return;
+                              setSheetState(() {
+                                isSubmitting = false;
+                                errorMessage = 'Something went wrong. Please try again.';
+                              });
                             }
                           },
                           child: isSubmitting

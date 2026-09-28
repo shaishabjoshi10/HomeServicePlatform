@@ -1,0 +1,8 @@
+Add this dependency to the Flutter project's existing pubspec.yaml:
+
+  webview_flutter: ^4.14.1
+
+Then run:
+  flutter pub get
+
+The current webview_flutter release supports Android/iOS and requires Dart 3.10 for 4.14.1. If the project uses an older Dart/Flutter SDK, use the latest compatible 4.x version instead.

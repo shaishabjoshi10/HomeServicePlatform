@@ -6,6 +6,8 @@ import '../main.dart';
 import '../models/booking.dart';
 import '../models/service_job.dart';
 import '../services/booking_service.dart';
+import '../services/payment_service.dart';
+import 'esewa_payment_page.dart';
 import 'booking_timeline.dart';
 import 'customer_navigation_map.dart';
 
@@ -114,6 +116,44 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
       if (!mounted) return;
       setState(() => _booking = updated);
     } on BookingServiceException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Colors.red.shade600),
+      );
+    }
+  }
+
+  Future<void> _payWithEsewa() async {
+    if (_booking.totalAmount == null || _booking.paymentStatus == 'paid') return;
+    try {
+      final payment = await PaymentService.initiate(
+        accessToken: widget.accessToken,
+        bookingId: _booking.id,
+      );
+      if (!mounted) return;
+      final updated = await Navigator.push<Booking>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => EsewaPaymentPage(
+            accessToken: widget.accessToken,
+            payment: payment,
+          ),
+        ),
+      );
+      if (!mounted) return;
+      if (updated != null) {
+        setState(() => _booking = updated);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Payment verified successfully.'), backgroundColor: kPrimaryGreen),
+        );
+      } else {
+        final refreshed = await BookingService.getBooking(
+          accessToken: widget.accessToken,
+          bookingId: _booking.id,
+        );
+        if (mounted) setState(() => _booking = refreshed);
+      }
+    } on PaymentServiceException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(e.message), backgroundColor: Colors.red.shade600),
@@ -279,6 +319,68 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                     ? '${b.priceLabel!} · final price depends on the work needed'
                     : b.priceLabel!,
               ),
+            if (b.hasPrice) ...[
+              _DetailRow(
+                icon: Icons.add_card_outlined,
+                label: 'Additional charges',
+                value: 'Rs. ${b.extraCharges.toStringAsFixed(2)}'
+                    '${b.extraCharges > 0 && b.extraChargeNote != null && b.extraChargeNote!.isNotEmpty ? ' · ${b.extraChargeNote}' : ''}',
+              ),
+              _DetailRow(
+                icon: Icons.account_balance_wallet_outlined,
+                label: 'Total amount',
+                value: 'Rs. ${(b.totalAmount ?? ((b.price ?? 0) + b.extraCharges)).toStringAsFixed(2)}',
+              ),
+            ],
+            if (b.hasPrice && b.paymentStatus == 'paid') ...[
+              const SizedBox(height: 4),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: Colors.green.shade200),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.verified_rounded, color: Colors.green.shade700),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Payment successful${b.paymentReference != null ? ' · Ref ${b.paymentReference}' : ''}',
+                        style: TextStyle(fontWeight: FontWeight.w700, color: Colors.green.shade800),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else if (b.hasPrice && b.status != 'rejected' && b.status != 'cancelled' && b.status != 'pending') ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: _payWithEsewa,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: kPrimaryGreen,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  icon: const Icon(Icons.account_balance_wallet_outlined, size: 18),
+                  label: Text(
+                    'Pay with eSewa · Rs. ${(b.totalAmount ?? ((b.price ?? 0) + b.extraCharges)).toStringAsFixed(2)}',
+                  ),
+                ),
+              ),
+              if (b.paymentStatus == 'failed' || b.paymentStatus == 'cancelled')
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    b.paymentStatus == 'cancelled' ? 'Payment was cancelled. You can try again.' : 'Payment failed. You can try again.',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+            ],
             _DetailRow(icon: Icons.location_on_outlined, label: 'Address', value: b.address),
             if (b.preferredDate != null)
               _DetailRow(
