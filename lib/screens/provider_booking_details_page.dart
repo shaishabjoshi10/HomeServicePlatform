@@ -5,18 +5,20 @@ import '../models/booking.dart';
 import '../models/service_job.dart';
 import '../services/booking_service.dart';
 import '../services/payment_service.dart';
+import 'booking_detail_widgets.dart';
 import 'provider_navigation_map.dart';
 
-/// Full detail view for one of the provider's own bookings — customer
-/// name, status, price, and the accept/decline/journey/complete actions
-/// are shown up front; the customer's phone number, address, date/time,
-/// problem description, notes, and when the request was made sit behind
-/// the "View Details" toggle so the page doesn't dump everything on the
-/// provider at once. Mirrors [BookingDetailsPage] (the customer-side
-/// equivalent) in layout, spacing, and button styling; only the information
-/// shown and the available actions differ, since a provider needs to see who
-/// booked them (and their phone number) and needs to move the booking through
-/// its lifecycle rather than cancel or rate it.
+/// Full detail view for one of the provider's own bookings, organized into
+/// clearly labeled sections — Booking Status (live tracking map, once the
+/// job's underway), Booking Information (the customer's phone number,
+/// address, date/time, problem description, notes, and when the request was
+/// made), and Payment Summary (price, charges, customer total and payment
+/// status) — followed by whichever accept/decline/journey/complete action
+/// applies to the booking's current status. Mirrors [BookingDetailsPage]
+/// (the customer-side equivalent) in layout, spacing, and button styling;
+/// only the information shown and the available actions differ, since a
+/// provider needs to see who booked them (and their phone number) and needs
+/// to move the booking through its lifecycle rather than cancel or rate it.
 ///
 /// This page keeps its own local copy of the booking so accept/decline/
 /// journey/complete reflect immediately without waiting on the list to
@@ -48,12 +50,6 @@ class ProviderBookingDetailsPage extends StatefulWidget {
 class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage> {
   late Booking _booking;
   bool _updating = false;
-
-  /// Whether the "View Details" section (phone, address, date/time,
-  /// problem description, notes, and when the request was made) is
-  /// expanded. Starts collapsed so the page opens on just the basics —
-  /// customer name, status, price, and the accept/decline/journey actions.
-  bool _showDetails = false;
 
   @override
   void initState() {
@@ -197,8 +193,12 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
   @override
   Widget build(BuildContext context) {
     final b = _booking;
+    final showLiveMap = (b.status == 'accepted' || b.status == 'on_the_way' || b.status == 'arrived') &&
+        b.latitude != null &&
+        b.longitude != null;
 
     return Scaffold(
+      backgroundColor: Colors.grey.shade50,
       appBar: AppBar(
         title: const Text('Booking Details'),
         backgroundColor: Colors.white,
@@ -206,7 +206,7 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
         elevation: 0,
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -241,6 +241,7 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
                 style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
               ),
             ],
+            const SizedBox(height: 16),
             // The navigation map: the customer's pin shows as soon as the
             // job is accepted; the provider's own live position and the
             // route between the two join it once they're on the way, and
@@ -248,68 +249,88 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
             // (this whole block simply stops being included in the tree,
             // which is what tears the map's State — and its GPS stream —
             // down; see ProviderNavigationMap).
-            if ((b.status == 'accepted' || b.status == 'on_the_way' || b.status == 'arrived') &&
-                b.latitude != null &&
-                b.longitude != null) ...[
-              const SizedBox(height: 20),
-              ProviderNavigationMap(
-                key: ValueKey(b.id),
-                accessToken: widget.accessToken,
-                bookingId: b.id,
-                status: b.status,
-                customerLatitude: b.latitude!,
-                customerLongitude: b.longitude!,
-                customerAddress: b.address,
+            if (showLiveMap) ...[
+              BookingSectionCard(
+                title: 'Booking Status',
+                icon: Icons.checklist_rtl_rounded,
+                child: ProviderNavigationMap(
+                  key: ValueKey(b.id),
+                  accessToken: widget.accessToken,
+                  bookingId: b.id,
+                  status: b.status,
+                  customerLatitude: b.latitude!,
+                  customerLongitude: b.longitude!,
+                  customerAddress: b.address,
+                ),
               ),
+              const SizedBox(height: 14),
             ],
-            const SizedBox(height: 20),
-            // What this job was booked at. The provider sees the same
-            // figure the customer agreed to, so there's no discrepancy to
-            // argue about on the doorstep.
-            if (b.hasPrice)
-              _DetailRow(
-                icon: Icons.payments_outlined,
-                label: b.priceType == PriceType.startingFrom ? 'Price (starting from)' : 'Price',
-                value: b.priceType == PriceType.startingFrom
-                    ? '${b.priceLabel!} · final price depends on the work needed'
-                    : b.priceLabel!,
+            BookingSectionCard(
+              title: 'Booking Information',
+              icon: Icons.info_outline_rounded,
+              child: Column(
+                children: [
+                  if (b.customerPhone != null && b.customerPhone!.isNotEmpty)
+                    BookingDetailRow(icon: Icons.phone_outlined, label: 'Phone', value: b.customerPhone!),
+                  AddressInfoRow(booking: b),
+                  if (b.preferredDate != null)
+                    BookingDetailRow(
+                      icon: Icons.event_outlined,
+                      label: 'Date & Time',
+                      value: '${_formatDate(b.preferredDate!)}'
+                          ' · ${TimeOfDay.fromDateTime(b.preferredDate!).format(context)}',
+                    ),
+                  if (b.problemDescription != null && b.problemDescription!.isNotEmpty)
+                    BookingDetailRow(
+                      icon: Icons.report_problem_outlined,
+                      label: 'Problem Description',
+                      value: b.problemDescription!,
+                    ),
+                  if (b.notes != null && b.notes!.isNotEmpty)
+                    BookingDetailRow(icon: Icons.notes_rounded, label: 'Notes', value: b.notes!),
+                  BookingDetailRow(
+                    icon: Icons.access_time_rounded,
+                    label: 'Requested On',
+                    value: _formatDate(b.createdAt),
+                    isLast: true,
+                  ),
+                ],
               ),
+            ),
+            // What this job was booked at, any extra charges, the resulting
+            // customer total, and whether it's been paid. The provider sees
+            // the same figure the customer agreed to, so there's no
+            // discrepancy to argue about on the doorstep.
             if (b.hasPrice) ...[
-              _DetailRow(
-                icon: Icons.add_card_outlined,
-                label: 'Additional charges',
-                value: b.extraCharges > 0
-                    ? 'Rs. ${b.extraCharges.toStringAsFixed(2)}${b.extraChargeNote != null ? ' · ${b.extraChargeNote}' : ''}'
-                    : 'None',
-              ),
-              _DetailRow(
-                icon: Icons.account_balance_wallet_outlined,
-                label: 'Customer total',
-                value: 'Rs. ${(b.totalAmount ?? ((b.price ?? 0) + b.extraCharges)).toStringAsFixed(2)}',
-              ),
-            ],
-            const SizedBox(height: 4),
-            if (_showDetails) ...[
-              const SizedBox(height: 8),
-              if (b.customerPhone != null && b.customerPhone!.isNotEmpty)
-                _DetailRow(icon: Icons.phone_outlined, label: 'Phone', value: b.customerPhone!),
-              _DetailRow(icon: Icons.location_on_outlined, label: 'Address', value: b.address),
-              if (b.preferredDate != null)
-                _DetailRow(
-                  icon: Icons.event_outlined,
-                  label: 'Date & Time',
-                  value: '${_formatDate(b.preferredDate!)}'
-                      ' · ${TimeOfDay.fromDateTime(b.preferredDate!).format(context)}',
+              const SizedBox(height: 14),
+              BookingSectionCard(
+                title: 'Payment Summary',
+                icon: Icons.receipt_long_rounded,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    PaymentSummaryRow(
+                      label: b.priceType == PriceType.startingFrom ? 'Price (starting from)' : 'Price',
+                      value: b.priceLabel!,
+                      note: b.priceType == PriceType.startingFrom ? 'Final price depends on the work needed' : null,
+                    ),
+                    PaymentSummaryRow(
+                      label: 'Additional charges',
+                      value: b.extraCharges > 0 ? 'Rs. ${b.extraCharges.toStringAsFixed(2)}' : 'None',
+                      note: b.extraCharges > 0 ? b.extraChargeNote : null,
+                    ),
+                    const Divider(height: 22),
+                    PaymentSummaryRow(
+                      label: 'Customer Total',
+                      value: 'Rs. ${(b.totalAmount ?? ((b.price ?? 0) + b.extraCharges)).toStringAsFixed(2)}',
+                      emphasize: true,
+                      isLast: true,
+                    ),
+                    const SizedBox(height: 14),
+                    PaymentStatusBadge(booking: b),
+                  ],
                 ),
-              if (b.problemDescription != null && b.problemDescription!.isNotEmpty)
-                _DetailRow(
-                  icon: Icons.report_problem_outlined,
-                  label: 'Problem Description',
-                  value: b.problemDescription!,
-                ),
-              if (b.notes != null && b.notes!.isNotEmpty)
-                _DetailRow(icon: Icons.notes_rounded, label: 'Notes', value: b.notes!),
-              _DetailRow(icon: Icons.access_time_rounded, label: 'Requested On', value: _formatDate(b.createdAt)),
+              ),
             ],
             if (b.status == 'pending') ...[
               // An unverified provider can still decline a request (that
@@ -318,7 +339,7 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
               // 403 the backend itself would return if this button were
               // somehow bypassed (see update_booking_status).
               if (!widget.isVerified) ...[
-                const SizedBox(height: 16),
+                const SizedBox(height: 14),
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(14),
@@ -352,7 +373,7 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
                   ),
                 ),
               ],
-              const SizedBox(height: 8),
+              const SizedBox(height: 14),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton(
@@ -386,7 +407,7 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
             ],
             if ((b.status == 'accepted' || b.status == 'on_the_way' || b.status == 'arrived') &&
                 b.paymentStatus != 'paid') ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 14),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
@@ -417,7 +438,7 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
               ),
             ],
             if (b.status == 'on_the_way') ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 14),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
@@ -432,7 +453,7 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
               ),
             ],
             if (b.status == 'arrived') ...[
-              const SizedBox(height: 8),
+              const SizedBox(height: 14),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
@@ -446,54 +467,8 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
                 ),
               ),
             ],
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () => setState(() => _showDetails = !_showDetails),
-                icon: Icon(_showDetails ? Icons.expand_less_rounded : Icons.expand_more_rounded, size: 18),
-                label: Text(_showDetails ? 'Hide Details' : 'View Details'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: kDarkText,
-                  side: BorderSide(color: Colors.grey.shade300),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                ),
-              ),
-            ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _DetailRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-
-  const _DetailRow({required this.icon, required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 18, color: kPrimaryGreen),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                const SizedBox(height: 2),
-                Text(value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }

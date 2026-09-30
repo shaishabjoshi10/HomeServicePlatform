@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-
 import '../main.dart';
 import '../models/booking.dart';
 import '../models/service_job.dart';
@@ -9,13 +8,16 @@ import '../services/booking_service.dart';
 import '../services/payment_service.dart';
 import 'esewa_payment_page.dart';
 import 'booking_timeline.dart';
+import 'booking_detail_widgets.dart';
 import 'customer_navigation_map.dart';
 
-/// Full detail view for one of the customer's own bookings — status
-/// timeline, price/payment, and the cancel/rate actions are shown up
-/// front; address, date/time, problem description, notes, and when the
-/// request was made sit behind the "View Details" toggle so the page
-/// doesn't dump everything on the customer at once.
+/// Full detail view for one of the customer's own bookings, organized into
+/// three clearly labeled sections — Booking Status (the status timeline and
+/// live tracking map), Booking Information (address, date/time, problem
+/// description, notes, and when the request was made), and Payment Summary
+/// (price, charges, total and payment status) — with "Rate Service"
+/// (or, while still pending, "Cancel Booking") pinned to the bottom as the
+/// page's one primary action.
 /// The booking list only shows the basics and links here for everything
 /// else. This page keeps its own local copy of the booking so cancel/rate
 /// reflect immediately without waiting on the list to reload; the list
@@ -41,12 +43,6 @@ class BookingDetailsPage extends StatefulWidget {
 
 class _BookingDetailsPageState extends State<BookingDetailsPage> {
   late Booking _booking;
-
-  /// Whether the "View Details" section (address, date/time, problem
-  /// description, notes, and when the request was made) is expanded.
-  /// Starts collapsed so the page opens on just the basics — title,
-  /// status, price/payment, and the cancel/rate actions.
-  bool _showDetails = false;
 
   Timer? _pollTimer;
   static const _pollInterval = Duration(seconds: 4);
@@ -242,8 +238,14 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   @override
   Widget build(BuildContext context) {
     final b = _booking;
+    final showStatusSection = b.status != 'rejected' && b.status != 'cancelled';
+    final showLiveMap =
+        (b.status == 'on_the_way' || b.status == 'arrived') && b.latitude != null && b.longitude != null;
+    final showPayButton =
+        b.hasPrice && b.paymentStatus != 'paid' && b.status != 'rejected' && b.status != 'cancelled' && b.status != 'pending';
 
     return Scaffold(
+      backgroundColor: Colors.grey.shade50,
       appBar: AppBar(
         title: const Text('Booking Details'),
         backgroundColor: Colors.white,
@@ -251,7 +253,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
         elevation: 0,
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -287,230 +289,218 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                 ),
               ],
             ),
-            if (b.status != 'rejected' && b.status != 'cancelled') ...[
-              const SizedBox(height: 20),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade200),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: BookingTimeline(status: b.status),
-              ),
-            ],
-            // The provider's live location: appears the moment they tap
-            // "I'm on my way" (status polling above is what notices that
-            // without the customer having to refresh) and disappears again
-            // — along with the route and the "waiting" placeholder it
-            // shows before the first GPS fix arrives — the instant the job
-            // is marked completed, since this block then simply stops
-            // being part of the tree.
-            if ((b.status == 'on_the_way' || b.status == 'arrived') && b.latitude != null && b.longitude != null) ...[
-              const SizedBox(height: 20),
-              CustomerNavigationMap(
-                key: ValueKey(b.id),
-                customerLatitude: b.latitude!,
-                customerLongitude: b.longitude!,
-                providerLatitude: b.providerLatitude,
-                providerLongitude: b.providerLongitude,
-              ),
-            ],
-            const SizedBox(height: 20),
-            // The price agreed when this booking was placed. It's a snapshot
-            // taken server-side, so it keeps showing what the customer
-            // actually booked at even if the job is repriced later.
-            if (b.hasPrice)
-              _DetailRow(
-                icon: Icons.payments_outlined,
-                label: b.priceType == PriceType.startingFrom ? 'Price (starting from)' : 'Price',
-                value: b.priceType == PriceType.startingFrom
-                    ? '${b.priceLabel!} · final price depends on the work needed'
-                    : b.priceLabel!,
-              ),
-            if (b.hasPrice) ...[
-              _DetailRow(
-                icon: Icons.add_card_outlined,
-                label: 'Additional charges',
-                value: 'Rs. ${b.extraCharges.toStringAsFixed(2)}'
-                    '${b.extraCharges > 0 && b.extraChargeNote != null && b.extraChargeNote!.isNotEmpty ? ' · ${b.extraChargeNote}' : ''}',
-              ),
-              _DetailRow(
-                icon: Icons.account_balance_wallet_outlined,
-                label: 'Total amount',
-                value: 'Rs. ${(b.totalAmount ?? ((b.price ?? 0) + b.extraCharges)).toStringAsFixed(2)}',
-              ),
-            ],
-            if (b.hasPrice && b.paymentStatus == 'paid') ...[
-              const SizedBox(height: 4),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Colors.green.shade50,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.green.shade200),
-                ),
-                child: Row(
+            const SizedBox(height: 16),
+            // The status timeline and, once the provider sets out, their
+            // live location — grouped together since both are about where
+            // this booking currently stands.
+            if (showStatusSection) ...[
+              BookingSectionCard(
+                title: 'Booking Status',
+                icon: Icons.checklist_rtl_rounded,
+                child: Column(
                   children: [
-                    Icon(Icons.verified_rounded, color: Colors.green.shade700),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Payment successful${b.paymentReference != null ? ' · Ref ${b.paymentReference}' : ''}',
-                        style: TextStyle(fontWeight: FontWeight.w700, color: Colors.green.shade800),
+                    BookingTimeline(status: b.status),
+                    // The provider's live location: appears the moment they
+                    // tap "I'm on my way" (status polling above is what
+                    // notices that without the customer having to refresh)
+                    // and disappears again — along with the route and the
+                    // "waiting" placeholder it shows before the first GPS fix
+                    // arrives — the instant the job is marked completed,
+                    // since this block then simply stops being part of the
+                    // tree.
+                    if (showLiveMap) ...[
+                      const SizedBox(height: 16),
+                      CustomerNavigationMap(
+                        key: ValueKey(b.id),
+                        customerLatitude: b.latitude!,
+                        customerLongitude: b.longitude!,
+                        providerLatitude: b.providerLatitude,
+                        providerLongitude: b.providerLongitude,
                       ),
-                    ),
+                    ],
                   ],
                 ),
               ),
-            ] else if (b.hasPrice && b.status != 'rejected' && b.status != 'cancelled' && b.status != 'pending') ...[
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _payWithEsewa,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: kPrimaryGreen,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  icon: const Icon(Icons.account_balance_wallet_outlined, size: 18),
-                  label: Text(
-                    'Pay with eSewa · Rs. ${(b.totalAmount ?? ((b.price ?? 0) + b.extraCharges)).toStringAsFixed(2)}',
-                  ),
-                ),
-              ),
-              if (b.paymentStatus == 'failed' || b.paymentStatus == 'cancelled')
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    b.paymentStatus == 'cancelled' ? 'Payment was cancelled. You can try again.' : 'Payment failed. You can try again.',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
+              const SizedBox(height: 14),
             ],
-            const SizedBox(height: 4),
-            if (_showDetails) ...[
-              const SizedBox(height: 8),
-              _DetailRow(icon: Icons.location_on_outlined, label: 'Address', value: b.address),
-              if (b.preferredDate != null)
-                _DetailRow(
-                  icon: Icons.event_outlined,
-                  label: 'Date & Time',
-                  value: '${_formatDate(b.preferredDate!)}'
-                      ' · ${TimeOfDay.fromDateTime(b.preferredDate!).format(context)}',
-                ),
-              if (b.problemDescription != null && b.problemDescription!.isNotEmpty)
-                _DetailRow(
-                  icon: Icons.report_problem_outlined,
-                  label: 'Problem Description',
-                  value: b.problemDescription!,
-                ),
-              if (b.notes != null && b.notes!.isNotEmpty)
-                _DetailRow(icon: Icons.notes_rounded, label: 'Notes', value: b.notes!),
-              _DetailRow(icon: Icons.access_time_rounded, label: 'Requested On', value: _formatDate(b.createdAt)),
-            ],
-            if (b.status == 'pending') ...[
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: _cancelBooking,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.red.shade600,
-                    side: BorderSide(color: Colors.red.shade200),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  child: const Text('Cancel Booking'),
-                ),
-              ),
-            ],
-            if (b.canBeRated) ...[
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton.icon(
-                  onPressed: _rateBooking,
-                  style: FilledButton.styleFrom(
-                    backgroundColor: kPrimaryGreen,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  icon: const Icon(Icons.star_outline_rounded, size: 18),
-                  label: const Text('Rate Service'),
-                ),
-              ),
-            ] else if (b.ratingStars != null) ...[
-              const SizedBox(height: 12),
-              Row(
+            BookingSectionCard(
+              title: 'Booking Information',
+              icon: Icons.info_outline_rounded,
+              child: Column(
                 children: [
-                  ...List.generate(
-                    5,
-                        (i) => Icon(
-                      i < b.ratingStars! ? Icons.star_rounded : Icons.star_border_rounded,
-                      size: 18,
-                      color: Colors.amber,
+                  AddressInfoRow(booking: b),
+                  if (b.preferredDate != null)
+                    BookingDetailRow(
+                      icon: Icons.event_outlined,
+                      label: 'Date & Time',
+                      value: '${_formatDate(b.preferredDate!)}'
+                          ' · ${TimeOfDay.fromDateTime(b.preferredDate!).format(context)}',
                     ),
+                  if (b.problemDescription != null && b.problemDescription!.isNotEmpty)
+                    BookingDetailRow(
+                      icon: Icons.report_problem_outlined,
+                      label: 'Problem Description',
+                      value: b.problemDescription!,
+                    ),
+                  if (b.notes != null && b.notes!.isNotEmpty)
+                    BookingDetailRow(icon: Icons.notes_rounded, label: 'Notes', value: b.notes!),
+                  BookingDetailRow(
+                    icon: Icons.access_time_rounded,
+                    label: 'Requested On',
+                    value: _formatDate(b.createdAt),
+                    isLast: true,
                   ),
-                  const SizedBox(width: 8),
-                  Text('You rated this service ${b.ratingStars}/5',
-                      style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
                 ],
               ),
-              if (b.ratingComment != null && b.ratingComment!.isNotEmpty) ...[
-                const SizedBox(height: 6),
-                Text('"${b.ratingComment}"',
-                    style: TextStyle(fontSize: 13, color: Colors.grey.shade700, fontStyle: FontStyle.italic)),
-              ],
-            ],
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton.icon(
-                onPressed: () => setState(() => _showDetails = !_showDetails),
-                icon: Icon(_showDetails ? Icons.expand_less_rounded : Icons.expand_more_rounded, size: 18),
-                label: Text(_showDetails ? 'Hide Details' : 'View Details'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: kDarkText,
-                  side: BorderSide(color: Colors.grey.shade300),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+            // The price agreed when this booking was placed, any extra
+            // charges, the resulting total, and whether it's been paid.
+            // It's a snapshot taken server-side, so it keeps showing what
+            // the customer actually booked at even if the job is repriced
+            // later.
+            if (b.hasPrice) ...[
+              const SizedBox(height: 14),
+              BookingSectionCard(
+                title: 'Payment Summary',
+                icon: Icons.receipt_long_rounded,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    PaymentSummaryRow(
+                      label: b.priceType == PriceType.startingFrom ? 'Price (starting from)' : 'Price',
+                      value: b.priceLabel!,
+                      note: b.priceType == PriceType.startingFrom ? 'Final price depends on the work needed' : null,
+                    ),
+                    PaymentSummaryRow(
+                      label: 'Additional charges',
+                      value: 'Rs. ${b.extraCharges.toStringAsFixed(2)}',
+                      note: b.extraCharges > 0 ? b.extraChargeNote : null,
+                    ),
+                    const Divider(height: 22),
+                    PaymentSummaryRow(
+                      label: 'Total Amount',
+                      value: 'Rs. ${(b.totalAmount ?? ((b.price ?? 0) + b.extraCharges)).toStringAsFixed(2)}',
+                      emphasize: true,
+                      isLast: true,
+                    ),
+                    const SizedBox(height: 14),
+                    PaymentStatusBadge(booking: b),
+                    if (showPayButton) ...[
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton.icon(
+                          onPressed: _payWithEsewa,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: kPrimaryGreen,
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                          ),
+                          icon: const Icon(Icons.account_balance_wallet_outlined, size: 18),
+                          label: Text(
+                            'Pay with eSewa · Rs. ${(b.totalAmount ?? ((b.price ?? 0) + b.extraCharges)).toStringAsFixed(2)}',
+                          ),
+                        ),
+                      ),
+                      if (b.paymentStatus == 'failed' || b.paymentStatus == 'cancelled')
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(
+                            b.paymentStatus == 'cancelled'
+                                ? 'Payment was cancelled. You can try again.'
+                                : 'Payment failed. You can try again.',
+                            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                    ],
+                  ],
                 ),
               ),
-            ),
+            ],
+            if (b.ratingStars != null) ...[
+              const SizedBox(height: 14),
+              BookingSectionCard(
+                title: 'Your Rating',
+                icon: Icons.star_rounded,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        ...List.generate(
+                          5,
+                              (i) => Icon(
+                            i < b.ratingStars! ? Icons.star_rounded : Icons.star_border_rounded,
+                            size: 18,
+                            color: Colors.amber,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text('${b.ratingStars}/5', style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+                      ],
+                    ),
+                    if (b.ratingComment != null && b.ratingComment!.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text('"${b.ratingComment}"',
+                          style: TextStyle(fontSize: 13, color: Colors.grey.shade700, fontStyle: FontStyle.italic)),
+                    ],
+                  ],
+                ),
+              ),
+            ],
           ],
         ),
       ),
+      // The page's one primary action, pinned to the bottom rather than
+      // buried at the end of the scroll: "Cancel Booking" while the request
+      // is still pending, or "Rate Service" once it's completed and not yet
+      // rated. Neither applies in between (accepted / on the way / arrived)
+      // or once already rated, so the bar simply isn't shown then.
+      bottomNavigationBar: b.status == 'pending'
+          ? _BottomActionBar(
+        child: OutlinedButton(
+          onPressed: _cancelBooking,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.red.shade600,
+            side: BorderSide(color: Colors.red.shade200),
+            padding: const EdgeInsets.symmetric(vertical: 14),
+          ),
+          child: const Text('Cancel Booking'),
+        ),
+      )
+          : b.canBeRated
+          ? _BottomActionBar(
+        child: FilledButton.icon(
+          onPressed: _rateBooking,
+          style: FilledButton.styleFrom(
+            backgroundColor: kPrimaryGreen,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+          ),
+          icon: const Icon(Icons.star_outline_rounded, size: 18),
+          label: const Text('Rate Service'),
+        ),
+      )
+          : null,
     );
   }
 }
 
-class _DetailRow extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-
-  const _DetailRow({required this.icon, required this.label, required this.value});
+/// Thin white footer bar holding this page's one primary action, with a
+/// hairline top border to separate it from the scrolling content above.
+class _BottomActionBar extends StatelessWidget {
+  final Widget child;
+  const _BottomActionBar({required this.child});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 18, color: kPrimaryGreen),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-                const SizedBox(height: 2),
-                Text(value, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
-              ],
-            ),
-          ),
-        ],
+    return SafeArea(
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          border: Border(top: BorderSide(color: Colors.grey.shade200)),
+        ),
+        child: SizedBox(width: double.infinity, child: child),
       ),
     );
   }

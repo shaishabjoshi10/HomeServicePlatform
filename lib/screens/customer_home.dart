@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../main.dart';
@@ -979,153 +980,226 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: CustomScrollView(
-          slivers: [
-            // ── Coloured header: location, notifications, greeting, and
-            // search — everything up to (and including) the search bar. It's
-            // one Container so the gradient and rounded bottom corners run
-            // behind all three pieces as a single banner; text and icons
-            // inside switch to white to stay readable against it. Nothing
-            // past the search bar (Popular Services onward) is touched.
-            SliverToBoxAdapter(
+  // ── Header pieces ──────────────────────────────────────────────────
+
+  Widget _buildLocationButton() {
+    return InkWell(
+      onTap: _setDefaultLocation,
+      borderRadius: BorderRadius.circular(14),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.18),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.location_on_rounded, color: Colors.white, size: 17),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Your location',
+                    style: TextStyle(fontSize: 11, color: Colors.white.withValues(alpha: 0.75)),
+                  ),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          _defaultLocation?.address ?? 'Kathmandu, Nepal',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                      const Icon(Icons.keyboard_arrow_down_rounded, size: 18, color: Colors.white),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNotificationButton() {
+    return InkWell(
+      // No notifications screen exists yet — same as before, this is
+      // visual only until one is added.
+      onTap: () {},
+      customBorder: const CircleBorder(),
+      child: Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.18),
+          shape: BoxShape.circle,
+        ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            const Icon(Icons.notifications_none_rounded, size: 20, color: Colors.white),
+            Positioned(
+              right: 9,
+              top: 8,
               child: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [kPrimaryGreen, kAccentGreen],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.only(
-                    bottomLeft: Radius.circular(28),
-                    bottomRight: Radius.circular(28),
-                  ),
-                ),
-                child: Column(
-                  children: [
-                    // Top bar
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          InkWell(
-                            onTap: _setDefaultLocation,
-                            borderRadius: BorderRadius.circular(8),
-                            child: Row(
-                              children: [
-                                const Icon(Icons.location_on_outlined, color: Colors.white, size: 18),
-                                const SizedBox(width: 4),
-                                ConstrainedBox(
-                                  constraints: const BoxConstraints(maxWidth: 110),
-                                  child: Text(
-                                    _defaultLocation?.address ?? 'Kathmandu, Nepal',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 13, color: Colors.white),
-                                  ),
-                                ),
-                                const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: Colors.white),
-                              ],
-                            ),
-                          ),
-                          Stack(
-                            clipBehavior: Clip.none,
-                            children: [
-                              const Icon(Icons.notifications_none_rounded, size: 24, color: Colors.white),
-                              Positioned(
-                                right: 0,
-                                top: 0,
-                                child: Container(
-                                  width: 8,
-                                  height: 8,
-                                  // White instead of the usual accent green —
-                                  // the badge would disappear against a green
-                                  // header otherwise.
-                                  decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-
-                    // Greeting (hidden while searching to keep focus on results)
-                    if (!_isSearching)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'What service do you need today?',
-                                    style: TextStyle(
-                                      fontSize: 22,
-                                      fontWeight: FontWeight.w700,
-                                      color: Colors.white,
-                                      height: 1.25,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            ProfilePictureAvatar(
-                              radius: 36,
-                              imageUrl: _profilePictureFullUrl,
-                              uploadPicture: _uploadOwnProfilePicture,
-                              onPictureUpdated: _onProfilePictureUpdated,
-                            ),
-                          ],
-                        ),
-                      ),
-
-                    // Search bar — white fill so it reads as a clear pill
-                    // sitting on the coloured banner, the way it would above
-                    // a plain white background.
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                      child: TextField(
-                        controller: _searchController,
-                        decoration: InputDecoration(
-                          hintText: 'Search for services...',
-                          prefixIcon: const Icon(Icons.search_rounded),
-                          suffixIcon: _isSearching
-                              ? IconButton(
-                            icon: const Icon(Icons.close_rounded),
-                            onPressed: () => _searchController.clear(),
-                          )
-                              : null,
-                          filled: true,
-                          fillColor: Colors.white,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide.none,
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                        ),
-                      ),
-                    ),
-                  ],
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: kPrimaryGreen, width: 1.5),
                 ),
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
 
-            // Breathing room between the header's rounded corner and
-            // whatever comes next (search results or Popular Services),
-            // neither of which carries its own top spacing.
-            const SliverToBoxAdapter(child: SizedBox(height: 16)),
+  /// Compact avatar. Tapping opens the profile menu, which is where the
+  /// picture can be changed (it holds the ProfilePictureAvatar uploader).
+  Widget _buildProfileButton() {
+    final url = _profilePictureFullUrl;
+    return GestureDetector(
+      onTap: () => _showProfileMenu(context),
+      child: Container(
+        padding: const EdgeInsets.all(2),
+        decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle),
+        child: CircleAvatar(
+          radius: 16,
+          backgroundColor: kLightGreenBg,
+          backgroundImage: url != null ? NetworkImage(url) : null,
+          onBackgroundImageError: url != null ? (_, _) {} : null,
+          child: url == null
+              ? const Icon(Icons.person_rounded, color: kPrimaryGreen, size: 18)
+              : null,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchBar() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(30),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.10),
+            blurRadius: 18,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: TextField(
+        controller: _searchController,
+        textInputAction: TextInputAction.search,
+        style: const TextStyle(fontSize: 15, color: kDarkText),
+        decoration: InputDecoration(
+          hintText: 'Search for services...',
+          hintStyle: TextStyle(fontSize: 15, color: Colors.grey.shade500),
+          prefixIcon: const Padding(
+            padding: EdgeInsets.only(left: 6),
+            child: Icon(Icons.search_rounded, color: kPrimaryGreen),
+          ),
+          suffixIcon: _isSearching
+              ? IconButton(
+            icon: Icon(Icons.close_rounded, color: Colors.grey.shade600),
+            onPressed: () => _searchController.clear(),
+          )
+              : null,
+          border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(vertical: 13, horizontal: 8),
+        ),
+      ),
+    );
+  }
+
+  /// Compact green header: location, notifications and profile on one
+  /// row, then the big heading and the search pill. The heading is hidden
+  /// while searching so the results get the room.
+  Widget _buildHeader(double topInset) {
+    return Container(
+      padding: EdgeInsets.fromLTRB(20, topInset + 6, 20, 16),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [kPrimaryGreen, kAccentGreen],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.only(
+          bottomLeft: Radius.circular(28),
+          bottomRight: Radius.circular(28),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(child: _buildLocationButton()),
+              const SizedBox(width: 8),
+              _buildNotificationButton(),
+              const SizedBox(width: 10),
+              _buildProfileButton(),
+            ],
+          ),
+          if (!_isSearching) ...[
+            const SizedBox(height: 12),
+            const Text(
+              'What service do you need today?',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+                color: Colors.white,
+                height: 1.2,
+                letterSpacing: -0.2,
+              ),
+            ),
+          ],
+          SizedBox(height: _isSearching ? 12 : 14),
+          _buildSearchBar(),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final topInset = MediaQuery.of(context).padding.top;
+
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      // Green header runs up under the status bar, so use light icons.
+      value: SystemUiOverlayStyle.light.copyWith(statusBarColor: Colors.transparent),
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF7F9F8),
+        body: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(child: _buildHeader(topInset)),
+
+            const SliverToBoxAdapter(child: SizedBox(height: 18)),
 
             // ── Search results (shown only while typing) ──
             if (_isSearching) ...[
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
                 sliver: SliverToBoxAdapter(
                   child: Text(
                     '${_searchResults.length} result${_searchResults.length == 1 ? '' : 's'} found',
@@ -1183,27 +1257,41 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
                 sliver: SliverToBoxAdapter(
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      Text('Popular Services',
-                          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: kDarkText)),
+                      const Text(
+                        'Popular Services',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: kDarkText),
+                      ),
                       TextButton(
                         onPressed: _openAllServices,
-                        style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
-                        child: const Text('View All',
-                            style: TextStyle(color: kPrimaryGreen, fontWeight: FontWeight.w600)),
+                        style: TextButton.styleFrom(
+                          padding: EdgeInsets.zero,
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('View All',
+                                style: TextStyle(color: kPrimaryGreen, fontWeight: FontWeight.w600)),
+                            SizedBox(width: 2),
+                            Icon(Icons.arrow_forward_ios_rounded, size: 12, color: kPrimaryGreen),
+                          ],
+                        ),
                       ),
                     ],
                   ),
                 ),
               ),
               SliverPadding(
-                padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
                 sliver: SliverGrid(
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 4,
-                    mainAxisSpacing: 16,
-                    crossAxisSpacing: 12,
-                    childAspectRatio: 0.78,
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 10,
+                    childAspectRatio: 0.82,
                   ),
                   delegate: SliverChildBuilderDelegate(
                         (context, index) => _CategoryTile(
@@ -1217,15 +1305,17 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
             ],
           ],
         ),
-      ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _navIndex,
-        onDestinationSelected: _onNavTap,
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'Home'),
-          NavigationDestination(icon: Icon(Icons.calendar_today_outlined), selectedIcon: Icon(Icons.calendar_today_rounded), label: 'Bookings'),
-          NavigationDestination(icon: Icon(Icons.person_outline_rounded), selectedIcon: Icon(Icons.person_rounded), label: 'Profile'),
-        ],
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _navIndex,
+          onDestinationSelected: _onNavTap,
+          backgroundColor: Colors.white,
+          indicatorColor: kLightGreenBg,
+          destinations: const [
+            NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded, color: kPrimaryGreen), label: 'Home'),
+            NavigationDestination(icon: Icon(Icons.calendar_today_outlined), selectedIcon: Icon(Icons.calendar_today_rounded, color: kPrimaryGreen), label: 'Bookings'),
+            NavigationDestination(icon: Icon(Icons.person_outline_rounded), selectedIcon: Icon(Icons.person_rounded, color: kPrimaryGreen), label: 'Profile'),
+          ],
+        ),
       ),
     );
   }
@@ -1275,34 +1365,36 @@ class _CategoryTile extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(16),
+      // Green icon box + label, with no white card around them.
+      // Anchored at the top with a fixed-height label area so every icon
+      // sits at the same position, even when a name wraps to two lines
+      // (e.g. "Appliance Repair").
       child: Column(
-        // Anchored at the top rather than centered: with center alignment,
-        // a two-line label (e.g. "Appliance Repair") made the whole column
-        // taller and pushed the icon square up relative to tiles with a
-        // one-line label, so icons drifted out of alignment across the
-        // grid. Anchoring at the top plus a fixed-height label area below
-        // keeps every icon at the exact same position regardless of how
-        // long its category name is.
         mainAxisAlignment: MainAxisAlignment.start,
         children: [
           Container(
-            width: 56,
-            height: 56,
+            width: 52,
+            height: 52,
             decoration: BoxDecoration(
-              color: Colors.grey.shade100,
+              color: kLightGreenBg,
               borderRadius: BorderRadius.circular(16),
             ),
-            child: Icon(category.icon, color: kPrimaryGreen, size: 24),
+            child: Icon(category.icon, color: kPrimaryGreen, size: 26),
           ),
           const SizedBox(height: 8),
           SizedBox(
-            height: 28, // room for exactly two lines at this font size
+            height: 30,
             child: Text(
               category.name,
               textAlign: TextAlign.center,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11),
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: kDarkText,
+                height: 1.25,
+              ),
             ),
           ),
         ],
