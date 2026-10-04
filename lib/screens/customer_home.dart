@@ -13,6 +13,7 @@ import '../services/profile_service.dart';
 import '../services/service_catalog_service.dart';
 import '../services/service_rating_service.dart';
 import '../widgets/profile_picture_picker.dart';
+import '../widgets/notification_bell.dart';
 import 'location_picker.dart';
 import 'my_bookings.dart';
 import 'login.dart';
@@ -1036,38 +1037,10 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
   }
 
   Widget _buildNotificationButton() {
-    return InkWell(
-      // No notifications screen exists yet — same as before, this is
-      // visual only until one is added.
-      onTap: () {},
-      customBorder: const CircleBorder(),
-      child: Container(
-        width: 36,
-        height: 36,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.18),
-          shape: BoxShape.circle,
-        ),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            const Icon(Icons.notifications_none_rounded, size: 20, color: Colors.white),
-            Positioned(
-              right: 9,
-              top: 8,
-              child: Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: kPrimaryGreen, width: 1.5),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return NotificationBell(
+      accessToken: widget.accessToken,
+      size: 36,
+      iconSize: 20,
     );
   }
 

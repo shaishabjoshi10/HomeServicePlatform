@@ -10,7 +10,7 @@ from app.config import settings
 from app.database import Base, SessionLocal, engine
 from sqlalchemy import text
 from app.models import Admin
-from app.routers import admin, auth, bookings, profile, providers, services
+from app.routers import admin, auth, bookings, notifications, profile, providers, services
 from app.security import hash_password
 
 
@@ -126,6 +126,7 @@ app.include_router(profile.router)
 app.include_router(providers.router)
 app.include_router(services.router)
 app.include_router(bookings.router)
+app.include_router(notifications.router)
 app.include_router(admin.router)
 
 

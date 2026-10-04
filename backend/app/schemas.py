@@ -533,3 +533,18 @@ class AdminVerificationUpdateRequest(BaseModel):
         if v not in (VerificationStatus.verified, VerificationStatus.rejected):
             raise ValueError("status must be 'verified' or 'rejected'")
         return v
+
+
+class NotificationOut(BaseModel):
+    id: uuid.UUID
+    booking_id: uuid.UUID | None
+    title: str
+    message: str
+    is_read: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class UnreadCountOut(BaseModel):
+    unread_count: int

@@ -11,6 +11,8 @@ import '../services/booking_service.dart';
 import '../services/provider_service.dart';
 import '../services/service_rating_service.dart';
 import '../widgets/profile_picture_picker.dart';
+import '../widgets/notification_bell.dart';
+import 'notifications_page.dart';
 import 'provider_booking_details_page.dart';
 import 'complete_profile.dart';
 import 'provider_bookings.dart';
@@ -306,7 +308,14 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
                         label: 'Notifications',
                         onTap: () {
                           Navigator.pop(context);
-                          // TODO: navigate to notifications settings
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => NotificationsPage(
+                                accessToken: widget.accessToken,
+                              ),
+                            ),
+                          );
                         },
                       ),
                       _ProfileMenuTile(
@@ -460,37 +469,10 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
   }
 
   Widget _buildNotificationButton() {
-    return InkWell(
-      // No notifications screen exists yet — visual only, as before.
-      onTap: () {},
-      customBorder: const CircleBorder(),
-      child: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.18),
-          shape: BoxShape.circle,
-        ),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            const Icon(Icons.notifications_none_rounded, size: 23, color: Colors.white),
-            Positioned(
-              right: 12,
-              top: 11,
-              child: Container(
-                width: 9,
-                height: 9,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: kPrimaryGreen, width: 1.5),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+    return NotificationBell(
+      accessToken: widget.accessToken,
+      size: 42,
+      iconSize: 23,
     );
   }
 

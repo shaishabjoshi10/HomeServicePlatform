@@ -23,6 +23,11 @@ from app.payments import (
 )
 from app.database import get_db
 from app.deps import get_current_user
+from app.notifications import (
+    notify_booking_created,
+    notify_payment_successful,
+    notify_status_change,
+)
 from app.models import (
     Booking,
     BookingStatus,
@@ -201,6 +206,8 @@ def create_booking(
         status=BookingStatus.pending,
     )
     db.add(booking)
+    db.flush()  # assigns booking.id, needed to link the notifications
+    notify_booking_created(db, booking, current_user.full_name)
     db.commit()
     db.refresh(booking)
 
@@ -395,10 +402,11 @@ def update_booking_status(
         booking.provider_longitude = None
         booking.provider_location_updated_at = None
 
+    customer = db.query(User).filter(User.id == booking.customer_id).first()
+    notify_status_change(db, booking, new_status, customer.full_name)
+
     db.commit()
     db.refresh(booking)
-
-    customer = db.query(User).filter(User.id == booking.customer_id).first()
 
     # A rating (which can only be created once a booking is completed, via
     # the separate /rating endpoint below) never exists yet at the moment
@@ -482,6 +490,11 @@ def _apply_esewa_response(db: Session, attempt: PaymentAttempt, response_data: d
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found.")
 
+    # Both the app's /verify call and eSewa's server callback can land here
+    # for the same payment; only the first one to flip it to "paid" should
+    # notify, so remember whether it already was (the row is locked above).
+    was_already_paid = booking.payment_status == "paid"
+
     transaction_uuid = str(response_data.get("transaction_uuid", ""))
     product_code = str(response_data.get("product_code", ""))
     try:
@@ -537,6 +550,11 @@ def _apply_esewa_response(db: Session, attempt: PaymentAttempt, response_data: d
         if attempt.status in {"cancelled", "failed"}:
             booking.payment_transaction_uuid = None
     booking.payment_updated_at = datetime.now(timezone.utc)
+
+    if attempt.status == "paid" and not was_already_paid:
+        customer = db.query(User).filter(User.id == booking.customer_id).first()
+        notify_payment_successful(db, booking, customer.full_name)
+
     db.commit()
     db.refresh(attempt)
     return attempt
