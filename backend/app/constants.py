@@ -12,6 +12,10 @@ SERVICE_CATEGORIES: list[str] = [
     "Pest Control",
 ]
 
+# The only service categories that offer the emergency service. Everything
+# else is bookable the normal way only.
+EMERGENCY_SERVICE_CATEGORIES: tuple[str, ...] = ("Electrical", "Plumbing")
+
 # Kathmandu Valley only, for now — the app's initial service area. Provider
 # verification no longer collects a free-choice city/municipality/address —
 # every provider is fixed to this single default city.

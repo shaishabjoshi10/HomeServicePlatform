@@ -94,6 +94,11 @@ class ProviderNavigationMap extends StatefulWidget {
   final double customerLongitude;
   final String customerAddress;
 
+  /// Emergency jobs start sharing the provider's position (and drawing the
+  /// route to the customer) as soon as the job is accepted, instead of
+  /// waiting for "I'm on my way".
+  final bool trackFromAccepted;
+
   const ProviderNavigationMap({
     super.key,
     required this.accessToken,
@@ -102,6 +107,7 @@ class ProviderNavigationMap extends StatefulWidget {
     required this.customerLatitude,
     required this.customerLongitude,
     required this.customerAddress,
+    this.trackFromAccepted = false,
   });
 
   @override
@@ -109,7 +115,12 @@ class ProviderNavigationMap extends StatefulWidget {
 }
 
 class _ProviderNavigationMapState extends State<ProviderNavigationMap> {
-  bool get _isTracking => widget.status == 'on_the_way' || widget.status == 'arrived';
+  static bool _tracksStatus(ProviderNavigationMap w) =>
+      w.status == 'on_the_way' ||
+          w.status == 'arrived' ||
+          (w.trackFromAccepted && w.status == 'accepted');
+
+  bool get _isTracking => _tracksStatus(widget);
 
   late final ValueNotifier<_NavSnapshot> _snapshot =
   ValueNotifier(_NavSnapshot(isTracking: _isTracking));
@@ -133,13 +144,20 @@ class _ProviderNavigationMapState extends State<ProviderNavigationMap> {
   @override
   void didUpdateWidget(covariant ProviderNavigationMap oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final wasTracking = oldWidget.status == 'on_the_way' || oldWidget.status == 'arrived';
+    final wasTracking = _tracksStatus(oldWidget);
     if (_isTracking && !wasTracking) {
       _snapshot.value = _snapshot.value.copyWith(isTracking: true);
       _startTracking();
     } else if (!_isTracking && wasTracking) {
       _stopTracking();
     }
+
+    // The customer's own phone keeps updating their position on emergency
+    // jobs, so redraw the route toward wherever they are now.
+    final customerMoved = oldWidget.customerLatitude != widget.customerLatitude ||
+        oldWidget.customerLongitude != widget.customerLongitude;
+    final current = _snapshot.value.providerLocation;
+    if (customerMoved && _isTracking && current != null) _fetchRoute(current);
   }
 
   @override

@@ -273,15 +273,15 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
                 ),
               ],
               // Secondary: date & time.
-              if (b.preferredDate != null) ...[
+              if (b.preferredDateNepal != null) ...[
                 SizedBox(height: hasDescription ? 4 : 6),
                 Row(
                   children: [
                     Icon(Icons.calendar_today_outlined, size: 12.5, color: Colors.grey.shade500),
                     const SizedBox(width: 5),
                     Text(
-                      '${b.preferredDate!.year}-${b.preferredDate!.month.toString().padLeft(2, '0')}-${b.preferredDate!.day.toString().padLeft(2, '0')}'
-                          ' · ${TimeOfDay.fromDateTime(b.preferredDate!).format(context)}',
+                      '${b.preferredDateNepal!.year}-${b.preferredDateNepal!.month.toString().padLeft(2, '0')}-${b.preferredDateNepal!.day.toString().padLeft(2, '0')}'
+                          ' · ${TimeOfDay.fromDateTime(b.preferredDateNepal!).format(context)}',
                       style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                     ),
                   ],

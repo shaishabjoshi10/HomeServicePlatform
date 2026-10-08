@@ -15,6 +15,7 @@ import '../services/service_rating_service.dart';
 import '../widgets/profile_picture_picker.dart';
 import '../widgets/notification_bell.dart';
 import 'location_picker.dart';
+import 'emergency_providers.dart';
 import 'my_bookings.dart';
 import 'login.dart';
 
@@ -264,6 +265,15 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
           rating: _ratingFor(categoryName),
           onSelectJob: (job) => _openBookingForm(serviceCategory: categoryName, job: job),
         ),
+      ),
+    );
+  }
+
+  void _openEmergencyProviders() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => EmergencyProvidersPage(accessToken: widget.accessToken),
       ),
     );
   }
@@ -1225,6 +1235,48 @@ class _CustomerHomePageState extends State<CustomerHomePage> {
 
             // ── Normal home content (hidden while searching) ──
             else ...[
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                sliver: SliverToBoxAdapter(
+                  child: InkWell(
+                    onTap: _openEmergencyProviders,
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.red.shade100),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 50,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade100,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(Icons.emergency_rounded, color: Colors.red.shade700),
+                          ),
+                          const SizedBox(width: 14),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Emergency Service', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: kDarkText)),
+                                SizedBox(height: 4),
+                                Text('Find verified available providers near your current location', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                              ],
+                            ),
+                          ),
+                          Icon(Icons.arrow_forward_ios_rounded, size: 15, color: Colors.red),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
               SliverPadding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 sliver: SliverToBoxAdapter(

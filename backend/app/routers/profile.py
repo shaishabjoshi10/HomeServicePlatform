@@ -1,15 +1,23 @@
 import os
+from datetime import datetime, timezone
 import uuid as uuid_module
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.constants import DEFAULT_CITY, EXPERIENCE_RANGES, SERVICE_CATEGORIES
+from app.constants import DEFAULT_CITY, EMERGENCY_SERVICE_CATEGORIES, EXPERIENCE_RANGES, SERVICE_CATEGORIES
 from app.database import get_db
 from app.deps import get_current_user
 from app.models import CustomerProfile, ProviderProfile, User, UserRole, VerificationStatus
-from app.schemas import CustomerProfileOut, ProfileOptionsOut, ProfileUpdateRequest, ProviderProfileOut
+from app.schemas import (
+    CustomerProfileOut,
+    ProfileOptionsOut,
+    ProfileUpdateRequest,
+    ProviderAvailabilityUpdateRequest,
+    ProviderLocationUpdateRequest,
+    ProviderProfileOut,
+)
 
 router = APIRouter(prefix="/api/profile", tags=["profile"])
 
@@ -143,12 +151,34 @@ def update_my_profile(
     if payload.name is not None:
         profile.name = payload.name
     if payload.service_category is not None:
+        # `availability` defaults to true, and for Electrical/Plumbing that
+        # switch also starts live location sharing. A provider who has never
+        # shared a location must opt in via the switch, not get tracked just
+        # because they picked this category.
+        if (
+            payload.service_category in EMERGENCY_SERVICE_CATEGORIES
+            and profile.service_category != payload.service_category
+            and profile.location_updated_at is None
+        ):
+            profile.availability = False
         profile.service_category = payload.service_category
     if payload.experience is not None:
         profile.experience = payload.experience
     if payload.bio is not None:
         profile.bio = payload.bio
     if payload.availability is not None:
+        # Switching an emergency provider ON must go through
+        # PUT /me/availability so the flag and a GPS position are saved
+        # together; otherwise they would look "available" but never be found.
+        if (
+            payload.availability
+            and profile.service_category in EMERGENCY_SERVICE_CATEGORIES
+            and (profile.latitude is None or profile.location_updated_at is None)
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Use the availability switch on the home screen to go available - it needs your current location.",
+            )
         profile.availability = payload.availability
     if payload.date_of_birth is not None:
         profile.date_of_birth = payload.date_of_birth
@@ -159,6 +189,94 @@ def update_my_profile(
     if payload.alternative_phone is not None:
         profile.alternative_phone = payload.alternative_phone
 
+    db.commit()
+    db.refresh(profile)
+    return ProviderProfileOut.model_validate(profile)
+
+
+@router.put("/me/availability", response_model=ProviderProfileOut)
+def update_provider_availability(
+    payload: ProviderAvailabilityUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Switch emergency availability on or off.
+
+    ON saves the availability flag and the provider's current GPS position in
+    one transaction, so the provider shows up in customers' live emergency
+    list right away (for their own category, near their current location).
+    OFF removes them from that list right away.
+    """
+    if current_user.role != UserRole.provider:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only service provider accounts can change availability.",
+        )
+
+    profile = db.query(ProviderProfile).filter(ProviderProfile.user_id == current_user.id).with_for_update().first()
+    if not profile:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
+
+    if payload.availability:
+        if profile.service_category not in EMERGENCY_SERVICE_CATEGORIES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Emergency service is only available for: {', '.join(EMERGENCY_SERVICE_CATEGORIES)}.",
+            )
+        if profile.verification_status != VerificationStatus.verified:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Your profile must be verified by an admin before you can receive emergency requests.",
+            )
+        if payload.latitude is None or payload.longitude is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Your current location is required to receive emergency requests.",
+            )
+        profile.latitude = payload.latitude
+        profile.longitude = payload.longitude
+        profile.location_updated_at = datetime.now(timezone.utc)
+        profile.availability = True
+    else:
+        profile.availability = False
+        # While unavailable the app stops reporting location, so don't leave
+        # a stale position looking "live" on the record.
+        profile.location_updated_at = None
+
+    db.commit()
+    db.refresh(profile)
+    return ProviderProfileOut.model_validate(profile)
+
+
+@router.put("/me/location", response_model=ProviderProfileOut)
+def update_provider_location(
+    payload: ProviderLocationUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Store the provider's latest device location for nearby emergency search."""
+    if current_user.role != UserRole.provider:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only service provider accounts can update provider location.",
+        )
+
+    profile = db.query(ProviderProfile).filter(ProviderProfile.user_id == current_user.id).with_for_update().first()
+    if not profile:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
+
+    # Only a provider who switched emergency availability ON shares a live
+    # location. This also stops a late in-flight update from re-stamping a
+    # location right after the provider switched OFF.
+    if not profile.availability or profile.service_category not in EMERGENCY_SERVICE_CATEGORIES:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Turn on emergency availability to share your location.",
+        )
+
+    profile.latitude = payload.latitude
+    profile.longitude = payload.longitude
+    profile.location_updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(profile)
     return ProviderProfileOut.model_validate(profile)

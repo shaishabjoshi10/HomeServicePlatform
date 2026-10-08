@@ -1,21 +1,27 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import '../main.dart';
 import '../models/booking.dart';
+import '../models/emergency_provider.dart';
 import '../models/provider_profile.dart';
 import '../models/service_rating.dart';
 import '../services/api_config.dart';
 import '../services/booking_service.dart';
 import '../services/provider_service.dart';
 import '../services/service_rating_service.dart';
+import '../utils/device_location.dart';
+import '../utils/nepal_time.dart';
 import '../widgets/profile_picture_picker.dart';
 import '../widgets/notification_bell.dart';
 import 'notifications_page.dart';
 import 'provider_booking_details_page.dart';
 import 'complete_profile.dart';
 import 'provider_bookings.dart';
+import 'schedule_details_page.dart';
 import 'login.dart';
 
 class ServiceProviderHomePage extends StatefulWidget {
@@ -32,7 +38,7 @@ class ServiceProviderHomePage extends StatefulWidget {
   State<ServiceProviderHomePage> createState() => _ServiceProviderHomePageState();
 }
 
-class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
+class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> with WidgetsBindingObserver {
   int _navIndex = 0;
   static const int _profileTabIndex = 3;
 
@@ -44,6 +50,14 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
   // provider sees here is the overall rating of the service they offer.
   List<ServiceRating> _serviceRatings = [];
   bool _loadingServiceRatings = true;
+  Timer? _locationTimer;
+  Timer? _bookingsTimer;
+  bool _updatingLocation = false;
+  // Last successful live-location report, or why the last attempt failed —
+  // shown under the availability switch so a provider can see whether they
+  // are really discoverable.
+  DateTime? _lastLocationSync;
+  String? _locationSyncError;
 
   ServiceRating? get _serviceRating {
     final category = _profile?.serviceCategory;
@@ -54,11 +68,12 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
     return null;
   }
 
+  bool _togglingAvailability = false;
+
   List<Booking> _allBookings = [];
   List<Booking> _pendingBookings = [];
   List<Booking> _acceptedBookings = [];
   bool _loadingBookings = true;
-  String? _bookingsError;
 
   // See _respondToBooking — guards against a double-tap firing a second
   // status-change request for a booking whose first request hasn't
@@ -68,9 +83,69 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadProfile();
     _loadBookings();
     _loadServiceRatings();
+    // While available for emergencies the provider's position is re-sent
+    // every 30 seconds so customers always see where they really are.
+    _locationTimer = Timer.periodic(const Duration(seconds: 30), (_) => _syncCurrentLocation());
+    // Emergency requests are time-critical, so quietly poll for new ones
+    // instead of waiting for the provider to reopen the screen.
+    _bookingsTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (mounted && !_loadingBookings) _loadBookings(silent: true);
+    });
+  }
+
+  Future<void> _syncCurrentLocation() async {
+    // Only providers who are switched ON for emergencies publish a live
+    // location; everyone else's position is never sent or stored.
+    final profile = _profile;
+    if (profile == null ||
+        !profile.availability ||
+        !kEmergencyCategories.contains(profile.serviceCategory)) {
+      return;
+    }
+    if (_updatingLocation) return;
+    _updatingLocation = true;
+    try {
+      final position = await DeviceLocation.getBest();
+      await ProviderService.updateCurrentLocation(
+        accessToken: widget.accessToken,
+        latitude: position.latitude,
+        longitude: position.longitude,
+      );
+      if (!mounted) return;
+      setState(() {
+        _lastLocationSync = DateTime.now();
+        _locationSyncError = null;
+      });
+    } catch (e) {
+      // A temporary GPS or network failure must not break the app, but it is
+      // recorded so the provider can see their location is not being shared.
+      if (!mounted) return;
+      setState(() => _locationSyncError = e.toString());
+    } finally {
+      _updatingLocation = false;
+    }
+  }
+
+  // Timers do not run while the app is backgrounded or the screen is locked,
+  // so report the position again the moment the provider comes back.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && mounted) {
+      _syncCurrentLocation();
+      if (!_loadingBookings) _loadBookings(silent: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _locationTimer?.cancel();
+    _bookingsTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadServiceRatings() async {
@@ -89,11 +164,12 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
     }
   }
 
-  Future<void> _loadBookings() async {
-    setState(() {
-      _loadingBookings = true;
-      _bookingsError = null;
-    });
+  Future<void> _loadBookings({bool silent = false}) async {
+    if (!silent) {
+      setState(() {
+        _loadingBookings = true;
+      });
+    }
 
     try {
       final bookings = await BookingService.getMyBookings(accessToken: widget.accessToken);
@@ -104,16 +180,14 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
         _acceptedBookings = bookings.where((b) => b.status == 'accepted').toList();
         _loadingBookings = false;
       });
-    } on BookingServiceException catch (e) {
+    } on BookingServiceException {
       if (!mounted) return;
       setState(() {
-        _bookingsError = e.message;
         _loadingBookings = false;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _bookingsError = 'Something went wrong loading your bookings.';
         _loadingBookings = false;
       });
     }
@@ -144,10 +218,10 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
     }
   }
 
-  int _todaysAcceptedCount() {
-    final now = DateTime.now();
+  int _todayAcceptedCount() {
+    final now = nepalNow();
     return _acceptedBookings.where((b) {
-      final d = b.preferredDate;
+      final d = b.preferredDateNepal;
       return d != null && d.year == now.year && d.month == now.month && d.day == now.day;
     }).length;
   }
@@ -165,6 +239,9 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
         _profile = profile;
         _loadingProfile = false;
       });
+      // Already switched ON from an earlier session: refresh the live
+      // position straight away instead of waiting for the next tick.
+      _syncCurrentLocation();
     } on ProviderServiceException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -444,6 +521,22 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
     });
   }
 
+  /// Schedule → "View All": a dedicated Schedule Details page listing every
+  /// scheduled job. (Not the Bookings page — that is [_openAllBookings].)
+  void _openScheduleDetails() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ScheduleDetailsPage(
+          accessToken: widget.accessToken,
+          isVerified: _profile?.isVerified ?? false,
+        ),
+      ),
+    ).then((_) {
+      if (mounted) _loadBookings();
+    });
+  }
+
   // ── Header ─────────────────────────────────────────────────────────
 
   /// Small avatar; tapping opens the profile menu, which holds the
@@ -476,7 +569,115 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
     );
   }
 
-  /// Role + verification badge, or the loading / error state of the profile.
+  /// Reads the device's current GPS position, or throws an
+  /// [_EmergencyLocationException] with a message the provider can act on.
+  Future<Position> _getDevicePosition() async {
+    try {
+      return await DeviceLocation.getBest();
+    } on DeviceLocationException catch (e) {
+      throw _EmergencyLocationException(e.message);
+    }
+  }
+
+  /// Switches emergency availability. ON only takes effect once the provider's
+  /// real GPS position has been saved together with it; OFF removes them from
+  /// customers' live list immediately.
+  Future<void> _toggleAvailability(bool value) async {
+    if (_togglingAvailability || _profile == null) return;
+    setState(() => _togglingAvailability = true);
+    try {
+      final position = value ? await _getDevicePosition() : null;
+      final updated = await ProviderService.setEmergencyAvailability(
+        accessToken: widget.accessToken,
+        available: value,
+        latitude: position?.latitude,
+        longitude: position?.longitude,
+      );
+      if (!mounted) return;
+      setState(() {
+        _profile = updated;
+        _lastLocationSync = value ? DateTime.now() : null;
+        _locationSyncError = null;
+      });
+    } on _EmergencyLocationException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Colors.red.shade600),
+      );
+    } on ProviderServiceException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Colors.red.shade600),
+      );
+    } finally {
+      if (mounted) setState(() => _togglingAvailability = false);
+    }
+  }
+
+  Widget _buildAvailabilityToggle() {
+    if (_loadingProfile || _profile == null) return const SizedBox.shrink();
+    // Emergency availability only applies to Electrical and Plumbing
+    // providers; every other category never sees this switch.
+    if (!kEmergencyCategories.contains(_profile!.serviceCategory)) return const SizedBox.shrink();
+    final available = _profile!.availability;
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.14),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          Icon(available ? Icons.circle : Icons.circle_outlined, size: 10, color: available ? Colors.lightGreenAccent : Colors.white70),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              _togglingAvailability
+                  ? 'Updating...'
+                  : (available ? 'Available for emergency requests' : 'Unavailable for emergency requests'),
+              style: const TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.w600),
+            ),
+          ),
+          Switch.adaptive(
+            value: available,
+            onChanged: _togglingAvailability ? null : _toggleAvailability,
+            activeThumbColor: Colors.white,
+            activeTrackColor: Colors.lightGreen,
+            inactiveThumbColor: Colors.white70,
+            inactiveTrackColor: Colors.white24,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Small line under the switch saying whether the provider can actually be
+  /// found right now (verified? location being shared?).
+  Widget _buildAvailabilityStatus() {
+    final profile = _profile;
+    if (_loadingProfile || profile == null || !profile.availability) return const SizedBox.shrink();
+    if (!kEmergencyCategories.contains(profile.serviceCategory)) return const SizedBox.shrink();
+
+    String? text;
+    Color color = Colors.white70;
+    if (profile.verificationStatus != 'verified') {
+      text = 'Not visible to customers until an admin verifies your profile.';
+      color = Colors.amberAccent;
+    } else if (_locationSyncError != null) {
+      text = 'Location not being shared: $_locationSyncError';
+      color = Colors.amberAccent;
+    } else if (_lastLocationSync != null) {
+      final secs = DateTime.now().difference(_lastLocationSync!).inSeconds;
+      text = secs < 60 ? 'Location shared just now' : 'Location shared ${secs ~/ 60} min ago';
+    }
+    if (text == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 6, left: 4),
+      child: Text(text, style: TextStyle(fontSize: 11, color: color)),
+    );
+  }
+
   Widget _buildStatusLine() {
     if (_loadingProfile) {
       return Text('Loading your profile…',
@@ -609,6 +810,8 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
           ),
           const SizedBox(height: 8),
           _buildStatusLine(),
+          _buildAvailabilityToggle(),
+          _buildAvailabilityStatus(),
         ],
       ),
     );
@@ -656,7 +859,7 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
               divider(),
               _StatItem(
                 icon: Icons.calendar_today_outlined,
-                value: _loadingBookings ? '…' : '${_todaysAcceptedCount()}',
+                value: _loadingBookings ? '…' : '${_todayAcceptedCount()}',
                 label: 'Today',
               ),
               divider(),
@@ -871,7 +1074,14 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(b.customerName, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(b.customerName, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                    ),
+                    if (b.isEmergency) const _EmergencyBadge(),
+                  ],
+                ),
                 // The job requested and what it pays, so a provider can
                 // judge an incoming request before accepting it.
                 _jobLine(b),
@@ -935,65 +1145,160 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
     );
   }
 
-  Widget _buildScheduleSection() {
-    if (_acceptedBookings.isEmpty) {
-      return _emptyState(Icons.event_available_outlined, 'No appointments scheduled for today.');
+  static const _weekdayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  static const _monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+  /// The booking's own scheduled date and time, read the same way every other
+  /// booking card in the app reads it, so the Schedule agrees with them.
+  DateTime? _scheduledAt(Booking b) {
+    final d = b.preferredDateNepal;
+    if (d == null) return null;
+    return DateTime.utc(d.year, d.month, d.day, d.hour, d.minute);
+  }
+
+  /// Confirmed bookings ordered by their scheduled date and time. Bookings
+  /// with no date at all go last.
+  List<Booking> get _scheduledBookings {
+    final list = List<Booking>.of(_acceptedBookings);
+    list.sort((a, b) {
+      final x = _scheduledAt(a);
+      final y = _scheduledAt(b);
+      if (x == null && y == null) return a.id.compareTo(b.id);
+      if (x == null) return 1;
+      if (y == null) return -1;
+      final byTime = x.compareTo(y);
+      return byTime != 0 ? byTime : a.id.compareTo(b.id);
+    });
+    return list;
+  }
+
+  /// Whole days between [day] and today (negative = in the past).
+  int _daysFromToday(DateTime day) {
+    final now = nepalNow();
+    final today = DateTime.utc(now.year, now.month, now.day);
+    return DateTime.utc(day.year, day.month, day.day).difference(today).inDays;
+  }
+
+  String _dayLabel(DateTime day) {
+    switch (_daysFromToday(day)) {
+      case 0:
+        return 'Today';
+      case 1:
+        return 'Tomorrow';
+      case -1:
+        return 'Yesterday';
     }
+    final weekday = _weekdayNames[day.weekday - 1];
+    return '$weekday, ${day.day} ${_monthNames[day.month - 1]} ${day.year}';
+  }
+
+  Widget _buildScheduleSection() {
+    final bookings = _scheduledBookings;
+    if (bookings.isEmpty) {
+      return _emptyState(Icons.event_available_outlined, 'No appointments scheduled.');
+    }
+
+    // Group by each booking's own date, so a booking appears once, under the
+    // day it is actually scheduled for. The list is already in date/time
+    // order, so groups come out in order too.
+    final groups = <DateTime?, List<Booking>>{};
+    for (final b in bookings) {
+      final at = _scheduledAt(b);
+      final day = at == null ? null : DateTime.utc(at.year, at.month, at.day);
+      groups.putIfAbsent(day, () => []).add(b);
+    }
+
     return Container(
       decoration: _sectionDecoration,
       clipBehavior: Clip.antiAlias,
       child: Column(
-        children: List.generate(_acceptedBookings.length, (i) {
-          final b = _acceptedBookings[i];
-          return Column(
-            children: [
-              InkWell(
-                onTap: () => _openBooking(b),
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
-                        width: 42,
-                        height: 42,
-                        decoration: BoxDecoration(
-                          color: kLightGreenBg,
-                          borderRadius: BorderRadius.circular(13),
-                        ),
-                        child: const Icon(Icons.handyman_outlined, size: 20, color: kPrimaryGreen),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(b.customerName,
-                                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                            _jobLine(b),
-                            const SizedBox(height: 4),
-                            _addressLine(b),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: kLightGreenBg,
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: const Text('Confirmed',
-                            style: TextStyle(fontSize: 11, color: kPrimaryGreen, fontWeight: FontWeight.w600)),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              if (i != _acceptedBookings.length - 1) const Divider(height: 1, color: _cardBorder),
+        children: [
+          for (final entry in groups.entries) ...[
+            _buildScheduleDayHeader(entry.key),
+            for (var i = 0; i < entry.value.length; i++) ...[
+              _buildScheduleRow(entry.value[i]),
+              if (i != entry.value.length - 1) const Divider(height: 1, color: _cardBorder),
             ],
-          );
-        }),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScheduleDayHeader(DateTime? day) {
+    final overdue = day != null && _daysFromToday(day) < 0;
+    return Container(
+      width: double.infinity,
+      color: const Color(0xFFF4F7F5),
+      padding: const EdgeInsets.fromLTRB(14, 9, 14, 8),
+      child: Row(
+        children: [
+          Text(
+            day == null ? 'Date not set' : _dayLabel(day),
+            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: kDarkText),
+          ),
+          if (overdue) ...[
+            const SizedBox(width: 8),
+            Text('Overdue', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Colors.orange.shade800)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScheduleRow(Booking b) {
+    final at = _scheduledAt(b);
+    return InkWell(
+      onTap: () => _openBooking(b),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: kLightGreenBg,
+                borderRadius: BorderRadius.circular(13),
+              ),
+              child: const Icon(Icons.handyman_outlined, size: 20, color: kPrimaryGreen),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(b.customerName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                  _jobLine(b),
+                  const SizedBox(height: 4),
+                  _addressLine(b),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                if (at != null)
+                  Text(
+                    TimeOfDay(hour: at.hour, minute: at.minute).format(context),
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: kDarkText),
+                  ),
+                if (at != null) const SizedBox(height: 5),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: kLightGreenBg,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Text('Confirmed',
+                      style: TextStyle(fontSize: 11, color: kPrimaryGreen, fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -1134,11 +1439,11 @@ class _ServiceProviderHomePageState extends State<ServiceProviderHomePage> {
               ),
             ],
 
-            // Today's schedule
+            // Schedule
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
               sliver: SliverToBoxAdapter(
-                child: _sectionHeader("Today's Schedule", onViewAll: _openAllBookings),
+                child: _sectionHeader('Schedule', onViewAll: _openScheduleDetails),
               ),
             ),
             SliverPadding(
@@ -1247,4 +1552,30 @@ class _StatItem extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Red "EMERGENCY" pill shown on requests created from the emergency flow.
+class _EmergencyBadge extends StatelessWidget {
+  const _EmergencyBadge();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(20), border: Border.all(color: Colors.red.shade200)),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.emergency_rounded, size: 12, color: Colors.red.shade700),
+        const SizedBox(width: 3),
+        Text('EMERGENCY', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Colors.red.shade700)),
+      ],
+    ),
+  );
+}
+
+/// A location problem the provider can fix (GPS off, permission denied, ...)
+/// when switching on emergency availability.
+class _EmergencyLocationException implements Exception {
+  final String message;
+  _EmergencyLocationException(this.message);
 }

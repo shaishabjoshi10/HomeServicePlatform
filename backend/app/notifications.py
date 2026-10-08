@@ -11,6 +11,7 @@ notification is stored together with the event that caused it.
   customer cancels         -                          "Booking cancelled"
   on the way / arrived     yes                        -
   payment successful       "Payment successful"       "Payment received"
+  cash received            "Cash payment received"    "Cash payment recorded"
   booking completed        "Booking completed"        -
 
 Customer text never names the provider (customers aren't shown who was
@@ -31,6 +32,12 @@ def _job(booking: Booking) -> str:
 def notify_booking_created(db, booking: Booking, customer_name: str) -> None:
     """Call after db.flush() so booking.id exists."""
     job = _job(booking)
+    if booking.is_emergency:
+        _add(db, booking.customer_id, booking, "Emergency request sent",
+             f"Your emergency request for {job} has been sent.")
+        _add(db, booking.provider_id, booking, "Emergency request",
+             f"{customer_name} needs urgent help with {job}.")
+        return
     _add(db, booking.customer_id, booking, "Booking request sent",
          f"Your request for {job} has been sent.")
     _add(db, booking.provider_id, booking, "New booking request",
@@ -60,3 +67,10 @@ def notify_payment_successful(db, booking: Booking, customer_name: str) -> None:
     job = _job(booking)
     _add(db, booking.customer_id, booking, "Payment successful", f"Your payment for {job} was successful.")
     _add(db, booking.provider_id, booking, "Payment received", f"{customer_name} paid for {job}.")
+
+
+def notify_cash_received(db, booking: Booking, customer_name: str) -> None:
+    """Call once, when the provider confirms they were paid in cash."""
+    job = _job(booking)
+    _add(db, booking.customer_id, booking, "Cash payment received", f"Your cash payment for {job} was received.")
+    _add(db, booking.provider_id, booking, "Cash payment recorded", f"You recorded a cash payment from {customer_name} for {job}.")

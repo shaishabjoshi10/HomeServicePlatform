@@ -49,12 +49,21 @@ _seed_default_admin()
 def _ensure_payment_columns() -> None:
     """Small idempotent migration for existing PostgreSQL installations."""
     statements = [
+        "ALTER TABLE provider_profiles ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION",
+        "ALTER TABLE provider_profiles ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION",
+        "ALTER TABLE provider_profiles ADD COLUMN IF NOT EXISTS location_updated_at TIMESTAMPTZ",
         "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS extra_charges NUMERIC(10,2) NOT NULL DEFAULT 0",
         "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS extra_charge_note VARCHAR(500)",
         "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) NOT NULL DEFAULT 'unpaid'",
         "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_transaction_uuid VARCHAR(100)",
         "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_reference VARCHAR(100)",
         "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_updated_at TIMESTAMPTZ",
+        "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS payment_method VARCHAR(20)",
+        "UPDATE bookings SET payment_method = 'esewa' WHERE payment_status = 'paid' AND payment_method IS NULL",
+        "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS customer_latitude DOUBLE PRECISION",
+        "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS customer_longitude DOUBLE PRECISION",
+        "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS customer_location_updated_at TIMESTAMPTZ",
+        "ALTER TABLE bookings ADD COLUMN IF NOT EXISTS is_emergency BOOLEAN NOT NULL DEFAULT false",
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_bookings_payment_transaction_uuid ON bookings(payment_transaction_uuid) WHERE payment_transaction_uuid IS NOT NULL",
     ]
     # Older databases may have a payment_attempts table created by an earlier

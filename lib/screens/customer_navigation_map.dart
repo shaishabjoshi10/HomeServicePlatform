@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart' show ValueListenable;
@@ -106,10 +105,12 @@ class _CustomerNavigationMapState extends State<CustomerNavigationMap> {
   @override
   void didUpdateWidget(covariant CustomerNavigationMap oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final moved = oldWidget.providerLatitude != widget.providerLatitude ||
+    final providerMoved = oldWidget.providerLatitude != widget.providerLatitude ||
         oldWidget.providerLongitude != widget.providerLongitude;
+    final customerMoved = oldWidget.customerLatitude != widget.customerLatitude ||
+        oldWidget.customerLongitude != widget.customerLongitude;
     final location = _providerLocationFromWidget;
-    if (moved && location != null) {
+    if ((providerMoved || customerMoved) && location != null) {
       _snapshot.value = _snapshot.value.copyWith(providerLocation: location);
       _fetchRoute(location);
     }

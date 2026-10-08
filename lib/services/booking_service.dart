@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../models/booking.dart';
+import '../utils/nepal_time.dart';
 import 'api_config.dart';
 
 class BookingServiceException implements Exception {
@@ -54,7 +55,9 @@ class BookingService {
       'address': address,
       'latitude': latitude,
       'longitude': longitude,
-      'preferred_date': preferredDate.toIso8601String(),
+      // preferredDate holds the Nepal date/time the customer picked; send it
+      // with an explicit +05:45 offset so it never depends on the phone's timezone.
+      'preferred_date': nepalWallClockToIso8601(preferredDate),
       'problem_description': problemDescription,
       if (notes != null && notes.isNotEmpty) 'notes': notes,
     });
@@ -66,6 +69,51 @@ class BookingService {
     ));
 
     _checkStatus(response, expected: 201);
+    return Booking.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+
+  static Future<Booking> createEmergencyBooking({
+    required String accessToken,
+    required String providerId,
+    required String serviceCategory,
+    required String jobTitle,
+    required String address,
+    required double latitude,
+    required double longitude,
+    required String problemDescription,
+    String? notes,
+  }) async {
+    final response = await _send(() => http.post(
+      Uri.parse('$_baseUrl/emergency'),
+      headers: _authHeaders(accessToken),
+      body: jsonEncode({
+        'provider_id': providerId,
+        'service_category': serviceCategory,
+        'job_title': jobTitle,
+        'address': address,
+        'latitude': latitude,
+        'longitude': longitude,
+        'problem_description': problemDescription,
+        if (notes != null && notes.isNotEmpty) 'notes': notes,
+      }),
+    ));
+    _checkStatus(response, expected: 201);
+    return Booking.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  static Future<Booking> updateCustomerLocation({
+    required String accessToken,
+    required String bookingId,
+    required double latitude,
+    required double longitude,
+  }) async {
+    final response = await _send(() => http.put(
+      Uri.parse('$_baseUrl/$bookingId/customer-location'),
+      headers: _authHeaders(accessToken),
+      body: jsonEncode({'latitude': latitude, 'longitude': longitude}),
+    ));
+    _checkStatus(response, expected: 200);
     return Booking.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
 

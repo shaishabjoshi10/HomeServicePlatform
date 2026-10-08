@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import '../main.dart';
 import '../models/booking.dart';
 import '../models/service_job.dart';
@@ -52,13 +53,81 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   /// polling for. False for every terminal status (completed / rejected /
   /// cancelled) and for 'pending', where nothing to show here changes yet.
   bool get _shouldPoll =>
-      _booking.status == 'accepted' || _booking.status == 'on_the_way' || _booking.status == 'arrived';
+      _booking.status == 'accepted' ||
+          _booking.status == 'on_the_way' ||
+          _booking.status == 'arrived' ||
+          // An emergency request is time-critical: keep checking while it is
+          // still pending so the customer sees the moment a provider accepts.
+          (_booking.isEmergency && _booking.status == 'pending');
+
+  // --- Emergency: share the customer's own position with the provider ----
+  StreamSubscription<Position>? _positionSub;
+  DateTime? _lastLocationPush;
+  bool _startingLocationShare = false;
+  static const _minLocationPushInterval = Duration(seconds: 5);
+
+  bool get _shouldShareLocation =>
+      _booking.isEmergency &&
+          (_booking.status == 'accepted' || _booking.status == 'on_the_way' || _booking.status == 'arrived');
+
+  Future<void> _syncLocationSharing() async {
+    if (!_shouldShareLocation) {
+      _positionSub?.cancel();
+      _positionSub = null;
+      return;
+    }
+    if (_positionSub != null || _startingLocationShare) return;
+    _startingLocationShare = true;
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) return;
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) return;
+      if (!mounted || !_shouldShareLocation) return;
+
+      try {
+        final first = await Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high)
+            .timeout(const Duration(seconds: 10));
+        _pushCustomerLocation(first);
+      } catch (_) {
+        // The stream below supplies a fix once one is available.
+      }
+      if (!mounted || !_shouldShareLocation) return;
+      _positionSub = Geolocator.getPositionStream(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high, distanceFilter: 10),
+      ).listen(_pushCustomerLocation, onError: (_) {});
+    } catch (_) {
+      // Location is best-effort; the booking's saved address still works.
+    } finally {
+      _startingLocationShare = false;
+    }
+  }
+
+  Future<void> _pushCustomerLocation(Position position) async {
+    if (!_shouldShareLocation) return;
+    final now = DateTime.now();
+    if (_lastLocationPush != null && now.difference(_lastLocationPush!) < _minLocationPushInterval) return;
+    _lastLocationPush = now;
+    try {
+      await BookingService.updateCustomerLocation(
+        accessToken: widget.accessToken,
+        bookingId: _booking.id,
+        latitude: position.latitude,
+        longitude: position.longitude,
+      );
+    } catch (_) {
+      // A missed sample is fine; the next movement sends a fresh one.
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     _booking = widget.booking;
     if (_shouldPoll) _startPolling();
+    _syncLocationSharing();
   }
 
   void _startPolling() {
@@ -76,6 +145,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
       final updated = await BookingService.getBooking(accessToken: widget.accessToken, bookingId: _booking.id);
       if (!mounted) return;
       setState(() => _booking = updated);
+      _syncLocationSharing();
       // Reached a terminal status since the last poll — nothing left that
       // can still change on its own, so stop asking the server.
       if (!_shouldPoll) _stopPolling();
@@ -87,6 +157,7 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   @override
   void dispose() {
     _stopPolling();
+    _positionSub?.cancel();
     super.dispose();
   }
 
@@ -148,8 +219,12 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
       if (!mounted) return;
       if (updated != null) {
         setState(() => _booking = updated);
+        final paid = updated.paymentStatus == 'paid';
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Payment verified successfully.'), backgroundColor: kPrimaryGreen),
+          SnackBar(
+            content: Text(paid ? 'Payment verified successfully.' : 'Payment was not completed. You can try again.'),
+            backgroundColor: paid ? kPrimaryGreen : Colors.orange.shade700,
+          ),
         );
       } else {
         final refreshed = await BookingService.getBooking(
@@ -239,10 +314,21 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
   Widget build(BuildContext context) {
     final b = _booking;
     final showStatusSection = b.status != 'rejected' && b.status != 'cancelled';
-    final showLiveMap =
-        (b.status == 'on_the_way' || b.status == 'arrived') && b.latitude != null && b.longitude != null;
-    final showPayButton =
-        b.hasPrice && b.paymentStatus != 'paid' && b.status != 'rejected' && b.status != 'cancelled' && b.status != 'pending';
+    // Emergency jobs show the provider's live position from the moment they
+    // accept; normal bookings keep waiting for "I'm on my way".
+    final liveStatus = b.status == 'on_the_way' ||
+        b.status == 'arrived' ||
+        (b.isEmergency && b.status == 'accepted');
+    final showLiveMap = liveStatus && b.latitude != null && b.longitude != null;
+    // One rule for normal and emergency bookings: payment opens once the
+    // provider has accepted, because the provider may still add extra charges
+    // on site and a request that is rejected must not have been paid for.
+    final showPayButton = b.hasPrice &&
+        b.paymentStatus != 'paid' &&
+        b.status != 'rejected' &&
+        b.status != 'cancelled' &&
+        b.status != 'completed' &&
+        b.status != 'pending';
 
     return Scaffold(
       backgroundColor: Colors.grey.shade50,
@@ -312,8 +398,8 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
                       const SizedBox(height: 16),
                       CustomerNavigationMap(
                         key: ValueKey(b.id),
-                        customerLatitude: b.latitude!,
-                        customerLongitude: b.longitude!,
+                        customerLatitude: b.isEmergency ? (b.customerLatitude ?? b.latitude!) : b.latitude!,
+                        customerLongitude: b.isEmergency ? (b.customerLongitude ?? b.longitude!) : b.longitude!,
                         providerLatitude: b.providerLatitude,
                         providerLongitude: b.providerLongitude,
                       ),
@@ -329,12 +415,12 @@ class _BookingDetailsPageState extends State<BookingDetailsPage> {
               child: Column(
                 children: [
                   AddressInfoRow(booking: b),
-                  if (b.preferredDate != null)
+                  if (b.preferredDateNepal != null)
                     BookingDetailRow(
                       icon: Icons.event_outlined,
                       label: 'Date & Time',
-                      value: '${_formatDate(b.preferredDate!)}'
-                          ' · ${TimeOfDay.fromDateTime(b.preferredDate!).format(context)}',
+                      value: '${_formatDate(b.preferredDateNepal!)}'
+                          ' · ${TimeOfDay.fromDateTime(b.preferredDateNepal!).format(context)}',
                     ),
                   if (b.problemDescription != null && b.problemDescription!.isNotEmpty)
                     BookingDetailRow(

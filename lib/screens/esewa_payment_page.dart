@@ -101,6 +101,35 @@ class _EsewaPaymentPageState extends State<EsewaPaymentPage> {
         data: data,
       );
       if (!mounted) return;
+      if (booking.paymentStatus == 'paid') {
+        Navigator.pop(context, booking);
+        return;
+      }
+      // The server only reports "paid" once eSewa itself has confirmed the
+      // payment. Anything else is not a success.
+      if (booking.paymentStatus == 'pending') {
+        // eSewa has not finalised the transaction yet — let the customer
+        // re-check instead of telling them it worked.
+        _handledRedirect = false;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('eSewa has not confirmed the payment yet.'),
+            backgroundColor: Colors.orange.shade700,
+            duration: const Duration(seconds: 10),
+            action: SnackBarAction(
+              label: 'Check again',
+              textColor: Colors.white,
+              onPressed: () {
+                _handledRedirect = true;
+                _finishSuccess(data);
+              },
+            ),
+          ),
+        );
+        return;
+      }
+      // failed / cancelled / refunded: hand the booking back so the details
+      // page shows the real state.
       Navigator.pop(context, booking);
     } on PaymentServiceException catch (e) {
       if (!mounted) return;

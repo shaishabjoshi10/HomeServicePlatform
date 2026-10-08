@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../main.dart';
@@ -51,10 +53,38 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
   late Booking _booking;
   bool _updating = false;
 
+  Timer? _pollTimer;
+
+  // Emergency jobs refresh themselves so the provider sees the customer's
+  // live position (and a cancellation) without leaving the page.
+  bool get _shouldPoll =>
+      _booking.isEmergency &&
+          (_booking.status == 'accepted' || _booking.status == 'on_the_way' || _booking.status == 'arrived');
+
   @override
   void initState() {
     super.initState();
     _booking = widget.booking;
+    if (_booking.isEmergency) {
+      _pollTimer = Timer.periodic(const Duration(seconds: 5), (_) => _pollBooking());
+    }
+  }
+
+  Future<void> _pollBooking() async {
+    if (!mounted || _updating || !_shouldPoll) return;
+    try {
+      final updated = await BookingService.getBooking(accessToken: widget.accessToken, bookingId: _booking.id);
+      if (!mounted || _updating) return;
+      setState(() => _booking = updated);
+    } catch (_) {
+      // Best-effort: try again on the next tick.
+    }
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _editCharges() async {
@@ -118,6 +148,58 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
         note: result.$2,
       );
       if (mounted) setState(() => _booking = updated);
+    } on PaymentServiceException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.message), backgroundColor: Colors.red.shade600),
+      );
+    } finally {
+      if (mounted) setState(() => _updating = false);
+    }
+  }
+
+  /// "Received in Cash": the provider confirms the customer handed over the
+  /// money. The server marks the booking paid, which unlocks completion.
+  Future<void> _markCashReceived() async {
+    if (_updating) return;
+    final b = _booking;
+    final total = b.totalAmount ?? (b.price != null ? b.price! + b.extraCharges : null);
+    final amountText = total != null ? 'Rs. ${total.toStringAsFixed(2)}' : 'the payment';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Received in cash?'),
+        content: Text(
+          'Confirm that ${b.customerName} has paid you $amountText in cash. '
+              'This marks the booking as paid and cannot be undone.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Not yet')),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            style: FilledButton.styleFrom(backgroundColor: kPrimaryGreen),
+            child: const Text('Yes, received'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _updating = true);
+    try {
+      final updated = await PaymentService.markCashReceived(
+        accessToken: widget.accessToken,
+        bookingId: b.id,
+      );
+      if (!mounted) return;
+      setState(() => _booking = updated);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cash payment recorded. You can now mark the job as completed.'),
+          backgroundColor: kPrimaryGreen,
+        ),
+      );
     } on PaymentServiceException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -258,9 +340,12 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
                   accessToken: widget.accessToken,
                   bookingId: b.id,
                   status: b.status,
-                  customerLatitude: b.latitude!,
-                  customerLongitude: b.longitude!,
+                  // Emergency customers keep sharing their live position, so
+                  // prefer it over the address pin the request was made at.
+                  customerLatitude: b.isEmergency ? (b.customerLatitude ?? b.latitude!) : b.latitude!,
+                  customerLongitude: b.isEmergency ? (b.customerLongitude ?? b.longitude!) : b.longitude!,
                   customerAddress: b.address,
+                  trackFromAccepted: b.isEmergency,
                 ),
               ),
               const SizedBox(height: 14),
@@ -273,12 +358,12 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
                   if (b.customerPhone != null && b.customerPhone!.isNotEmpty)
                     BookingDetailRow(icon: Icons.phone_outlined, label: 'Phone', value: b.customerPhone!),
                   AddressInfoRow(booking: b),
-                  if (b.preferredDate != null)
+                  if (b.preferredDateNepal != null)
                     BookingDetailRow(
                       icon: Icons.event_outlined,
                       label: 'Date & Time',
-                      value: '${_formatDate(b.preferredDate!)}'
-                          ' · ${TimeOfDay.fromDateTime(b.preferredDate!).format(context)}',
+                      value: '${_formatDate(b.preferredDateNepal!)}'
+                          ' · ${TimeOfDay.fromDateTime(b.preferredDateNepal!).format(context)}',
                     ),
                   if (b.problemDescription != null && b.problemDescription!.isNotEmpty)
                     BookingDetailRow(
@@ -452,8 +537,24 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
                 ),
               ),
             ],
-            if (b.status == 'arrived') ...[
+            if (b.status == 'arrived' && b.paymentStatus != 'paid') ...[
               const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: _updating ? null : _markCashReceived,
+                  icon: const Icon(Icons.payments_outlined, size: 18),
+                  label: const Text('Received in Cash'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: kPrimaryGreen,
+                    side: const BorderSide(color: kPrimaryGreen),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                ),
+              ),
+            ],
+            if (b.status == 'arrived') ...[
+              const SizedBox(height: 8),
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
@@ -463,7 +564,7 @@ class _ProviderBookingDetailsPageState extends State<ProviderBookingDetailsPage>
                     padding: const EdgeInsets.symmetric(vertical: 14),
                   ),
                   icon: const Icon(Icons.check_circle_outline_rounded, size: 18),
-                  label: Text(b.paymentStatus == 'paid' ? 'Mark as Completed' : 'Waiting for Customer Payment'),
+                  label: Text(b.paymentStatus == 'paid' ? 'Mark as Completed' : 'Waiting for Payment'),
                 ),
               ),
             ],

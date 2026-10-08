@@ -2,8 +2,9 @@ import re
 import uuid
 from datetime import date, datetime, timezone
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
 
+from app.timeutils import to_nepal, to_utc
 from app.constants import (
     DEFAULT_CITY,
     EXPERIENCE_RANGES,
@@ -103,8 +104,48 @@ class ProviderProfileOut(BaseModel):
     profile_picture_url: str | None
     verification_status: VerificationStatus
     availability: bool
+    latitude: float | None
+    longitude: float | None
+    location_updated_at: datetime | None
 
     model_config = {"from_attributes": True}
+
+
+class ProviderLocationUpdateRequest(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
+class ProviderAvailabilityUpdateRequest(BaseModel):
+    """Turn emergency availability on/off in a single call.
+
+    Turning it ON must carry the device's current GPS position so that the
+    availability flag and the location are always saved together; a provider
+    can never be "available" without a fresh location to be found by.
+    """
+
+    availability: bool
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+
+    @model_validator(mode="after")
+    def location_is_a_pair(self) -> "ProviderAvailabilityUpdateRequest":
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("Send both latitude and longitude, or neither.")
+        return self
+
+
+class EmergencyProviderOut(BaseModel):
+    user_id: uuid.UUID
+    name: str
+    service_category: str
+    experience: str | None
+    bio: str | None
+    city: str
+    profile_picture_url: str | None
+    latitude: float
+    longitude: float
+    distance_km: float
 
 
 class ProfileUpdateRequest(BaseModel):
@@ -251,6 +292,15 @@ class BookingCreateRequest(BaseModel):
             raise ValueError("Address is required.")
         return v
 
+    @field_validator("preferred_date")
+    @classmethod
+    def normalize_preferred_date(cls, v: datetime) -> datetime:
+        # The app sends the customer's Nepal time with an explicit +05:45
+        # offset. A value with no offset (older app builds) is taken to be
+        # Nepal time too, never the server's or database's timezone. It is
+        # stored as UTC so the instant is unambiguous in PostgreSQL.
+        return to_utc(v)
+
     @field_validator("problem_description")
     @classmethod
     def problem_description_must_be_meaningful(cls, v: str) -> str:
@@ -310,6 +360,48 @@ class BookingStatusUpdateRequest(BaseModel):
     status: BookingStatus
 
 
+class EmergencyBookingCreateRequest(BaseModel):
+    """Creates an emergency booking for a provider selected from the live nearby list."""
+
+    provider_id: uuid.UUID
+    service_category: str = Field(min_length=1, max_length=100)
+    address: str = Field(min_length=1, max_length=500)
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    # The specific job being requested. Required (unlike a normal booking)
+    # because an emergency booking has to carry a price: payment and
+    # completion are both blocked on a booking that has none, so an
+    # emergency request without a job could never be finished.
+    job_title: str = Field(min_length=1, max_length=150)
+    problem_description: str = Field(min_length=10, max_length=1000)
+    notes: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("service_category", "address", "problem_description", "job_title")
+    @classmethod
+    def strip_required(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("This field is required.")
+        return v
+
+    @model_validator(mode="after")
+    def job_must_belong_to_service(self) -> "EmergencyBookingCreateRequest":
+        job = find_service_job(self.service_category, self.job_title)
+        if job is None:
+            raise ValueError(
+                f"'{self.job_title}' is not a job offered under {self.service_category}."
+            )
+        # Store the catalogue's own spelling so the price lookup and every
+        # booking of the same job line up regardless of client casing.
+        object.__setattr__(self, "job_title", job.name)
+        return self
+
+
+class CustomerLocationUpdateRequest(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
 class BookingLocationUpdateRequest(BaseModel):
     """
     A single live-location sample the provider's device pushes while en
@@ -341,6 +433,7 @@ class BookingOut(BaseModel):
     total_amount: float | None = None
     payment_status: str = "unpaid"
     payment_reference: str | None = None
+    payment_method: str | None = None  # "esewa" | "cash" once paid
     address: str
     latitude: float | None
     longitude: float | None
@@ -361,6 +454,10 @@ class BookingOut(BaseModel):
     provider_latitude: float | None = None
     provider_longitude: float | None = None
     provider_location_updated_at: datetime | None = None
+    customer_latitude: float | None = None
+    customer_longitude: float | None = None
+    customer_location_updated_at: datetime | None = None
+    is_emergency: bool = False
 
     # Present only once the customer has rated this booking (a rating of
     # the overall service, not of a provider). Kept inline
@@ -371,6 +468,13 @@ class BookingOut(BaseModel):
     rated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
+
+    @field_serializer("preferred_date")
+    def _preferred_date_in_nepal_time(self, v: datetime | None) -> datetime | None:
+        # Always emit the scheduled time with an explicit Nepal (+05:45)
+        # offset, whatever timezone the database session returned it in, so
+        # customer and provider screens read the same date and time.
+        return to_nepal(v) if v is not None else None
 
 
 class RatingCreateRequest(BaseModel):

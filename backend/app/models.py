@@ -157,6 +157,13 @@ class ProviderProfile(Base):
     )
     availability = Column(Boolean, nullable=False, default=True)
 
+    # Latest provider device location used by the emergency nearby-provider
+    # search. This is deliberately profile-scoped (not booking-scoped): it
+    # represents where an available provider currently is.
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
+    location_updated_at = Column(DateTime(timezone=True), nullable=True)
+
     # Note: providers deliberately carry no rating of their own. Customers
     # rate the overall *service* (see `Rating` below), not the individual
     # person who happened to do the job.
@@ -201,6 +208,10 @@ class Booking(Base):
     # never allows that.
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
+    # Latest customer device location shared only while this booking is active.
+    customer_latitude = Column(Float, nullable=True)
+    customer_longitude = Column(Float, nullable=True)
+    customer_location_updated_at = Column(DateTime(timezone=True), nullable=True)
     # NOT NULL to match BookingCreateRequest: both are now mandatory at
     # booking time (see schemas.BookingCreateRequest). NOTE: create_all()
     # only creates missing tables, it does not add columns to a table that
@@ -227,6 +238,8 @@ class Booking(Base):
     provider_latitude = Column(Float, nullable=True)
     provider_longitude = Column(Float, nullable=True)
     provider_location_updated_at = Column(DateTime(timezone=True), nullable=True)
+    # True only for requests created from the emergency nearby-provider flow.
+    is_emergency = Column(Boolean, nullable=False, default=False, server_default="false", index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -238,6 +251,9 @@ class Booking(Base):
     payment_status = Column(String(20), nullable=False, default="unpaid", server_default="unpaid", index=True)
     payment_transaction_uuid = Column(String(100), nullable=True, unique=True, index=True)
     payment_reference = Column(String(100), nullable=True)
+    # How a paid booking was settled: "esewa" (online) or "cash" (the provider
+    # confirmed they were handed the money in person). NULL until paid.
+    payment_method = Column(String(20), nullable=True)
     payment_updated_at = Column(DateTime(timezone=True), nullable=True)
 
 

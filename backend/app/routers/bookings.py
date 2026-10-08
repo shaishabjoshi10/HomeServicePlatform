@@ -11,7 +11,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
-from app.constants import find_service_job, format_price_label
+from app.constants import EMERGENCY_SERVICE_CATEGORIES, find_service_job, format_price_label
 from app.config import settings
 from app.payments import (
     PaymentGatewayError,
@@ -23,8 +23,10 @@ from app.payments import (
 )
 from app.database import get_db
 from app.deps import get_current_user
+from app.routers.providers import EMERGENCY_LOCATION_MAX_AGE, provider_has_active_job
 from app.notifications import (
     notify_booking_created,
+    notify_cash_received,
     notify_payment_successful,
     notify_status_change,
 )
@@ -40,6 +42,8 @@ from app.models import (
 )
 from app.schemas import (
     BookingCreateRequest,
+    EmergencyBookingCreateRequest,
+    CustomerLocationUpdateRequest,
     BookingLocationUpdateRequest,
     BookingOut,
     BookingStatusUpdateRequest,
@@ -55,7 +59,7 @@ from app.schemas import (
 # ProviderNavigationMap): it starts tracking on 'on_the_way' and only stops
 # once the booking is marked 'completed', passing through 'arrived' in
 # between without interruption.
-_LOCATION_SHARING_STATUSES = (BookingStatus.on_the_way, BookingStatus.arrived)
+_LOCATION_SHARING_STATUSES = (BookingStatus.accepted, BookingStatus.on_the_way, BookingStatus.arrived)
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -91,6 +95,7 @@ def _to_booking_out(
                       if booking.price is not None else None),
         payment_status=booking.payment_status,
         payment_reference=booking.payment_reference,
+        payment_method=booking.payment_method,
         address=booking.address,
         latitude=booking.latitude,
         longitude=booking.longitude,
@@ -103,6 +108,10 @@ def _to_booking_out(
         provider_latitude=booking.provider_latitude,
         provider_longitude=booking.provider_longitude,
         provider_location_updated_at=booking.provider_location_updated_at,
+        customer_latitude=booking.customer_latitude,
+        customer_longitude=booking.customer_longitude,
+        customer_location_updated_at=booking.customer_location_updated_at,
+        is_emergency=bool(booking.is_emergency),
         rating_stars=rating.stars if rating else None,
         rating_comment=rating.comment if rating else None,
         rated_at=rating.created_at if rating else None,
@@ -147,16 +156,23 @@ def _pick_provider(db: Session, service_category: str) -> User | None:
         .subquery()
     )
 
-    return (
+    query = (
         db.query(User)
         .join(ProviderProfile, ProviderProfile.user_id == User.id)
         .outerjoin(open_jobs, open_jobs.c.provider_id == User.id)
         .filter(
             User.role == UserRole.provider,
             ProviderProfile.service_category == service_category,
-            ProviderProfile.availability.is_(True),
             ProviderProfile.verification_status == VerificationStatus.verified,
         )
+    )
+    # For Electrical/Plumbing the availability switch means "receive EMERGENCY
+    # requests" (and shares live location). Turning it off must not also stop
+    # ordinary scheduled bookings, so it only gates the other categories.
+    if service_category not in EMERGENCY_SERVICE_CATEGORIES:
+        query = query.filter(ProviderProfile.availability.is_(True))
+    return (
+        query
         .order_by(
             func.coalesce(open_jobs.c.open_count, 0),
             func.random(),
@@ -200,6 +216,9 @@ def create_booking(
         address=payload.address,
         latitude=payload.latitude,
         longitude=payload.longitude,
+        customer_latitude=payload.latitude,
+        customer_longitude=payload.longitude,
+        customer_location_updated_at=datetime.now(timezone.utc),
         problem_description=payload.problem_description,
         notes=payload.notes,
         preferred_date=payload.preferred_date,
@@ -211,6 +230,123 @@ def create_booking(
     db.commit()
     db.refresh(booking)
 
+    return _to_booking_out(booking, current_user.full_name, current_user.phone)
+
+
+@router.post("/emergency", response_model=BookingOut, status_code=status.HTTP_201_CREATED)
+def create_emergency_booking(
+    payload: EmergencyBookingCreateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Create an emergency request for the exact provider the customer selected."""
+    if current_user.role != UserRole.customer:
+        raise HTTPException(status_code=403, detail="Only customer accounts can create bookings.")
+
+    # Same case/whitespace-insensitive matching as the search endpoint, so a
+    # category that appeared in the list can always be booked.
+    wanted_category = payload.service_category.strip().lower()
+    category = next((c for c in EMERGENCY_SERVICE_CATEGORIES if c.lower() == wanted_category), None)
+    if category is None:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Emergency service is only available for: {', '.join(EMERGENCY_SERVICE_CATEGORIES)}.",
+        )
+    payload.service_category = category
+
+    provider = (
+        db.query(User)
+        .join(ProviderProfile, ProviderProfile.user_id == User.id)
+        .filter(User.id == payload.provider_id, User.role == UserRole.provider)
+        .first()
+    )
+    if not provider:
+        raise HTTPException(status_code=404, detail="Service provider not found.")
+
+    # Lock the provider's profile for the rest of this transaction so two
+    # customers can't both pass the availability/busy checks for the same
+    # provider at the same moment.
+    profile = (
+        db.query(ProviderProfile)
+        .filter(ProviderProfile.user_id == provider.id)
+        .with_for_update()
+        .first()
+    )
+    if (
+        not profile
+        or (profile.service_category or "").strip().lower() != payload.service_category.strip().lower()
+        or not profile.availability
+        or profile.verification_status != VerificationStatus.verified
+        or profile.latitude is None
+        or profile.longitude is None
+        or profile.location_updated_at is None
+    ):
+        raise HTTPException(status_code=409, detail="This provider is no longer available for emergency service.")
+
+    location_updated = profile.location_updated_at
+    if location_updated.tzinfo is None:
+        location_updated = location_updated.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) - location_updated > EMERGENCY_LOCATION_MAX_AGE:
+        raise HTTPException(status_code=409, detail="This provider's live location is no longer current.")
+
+    # The provider may have accepted someone else's job since the customer's
+    # list was loaded.
+    if provider_has_active_job(db, provider.id):
+        raise HTTPException(
+            status_code=409,
+            detail="This provider has just taken another job. Please choose another provider.",
+        )
+
+    # Guards against a double-tap / retry creating the same request twice.
+    already_requested = (
+        db.query(Booking.id)
+        .filter(
+            Booking.customer_id == current_user.id,
+            Booking.provider_id == provider.id,
+            Booking.is_emergency.is_(True),
+            Booking.status == BookingStatus.pending,
+        )
+        .first()
+    )
+    if already_requested:
+        raise HTTPException(
+            status_code=409,
+            detail="You already have a pending emergency request with this provider.",
+        )
+
+    # Price comes from the server catalogue, never from the client. The
+    # schema has already confirmed the job exists under this category.
+    job = find_service_job(payload.service_category, payload.job_title)
+    if job is None:
+        raise HTTPException(status_code=400, detail="That job is not offered under this service.")
+
+    booking = Booking(
+        customer_id=current_user.id,
+        provider_id=provider.id,
+        service_category=payload.service_category,
+        job_title=job.name,
+        price=job.price,
+        price_type=job.price_type.value,
+        address=payload.address,
+        latitude=payload.latitude,
+        longitude=payload.longitude,
+        customer_latitude=payload.latitude,
+        customer_longitude=payload.longitude,
+        customer_location_updated_at=datetime.now(timezone.utc),
+        problem_description=payload.problem_description,
+        notes=payload.notes,
+        preferred_date=datetime.now(timezone.utc),
+        status=BookingStatus.pending,
+        provider_latitude=profile.latitude,
+        provider_longitude=profile.longitude,
+        provider_location_updated_at=profile.location_updated_at,
+        is_emergency=True,
+    )
+    db.add(booking)
+    db.flush()
+    notify_booking_created(db, booking, current_user.full_name)
+    db.commit()
+    db.refresh(booking)
     return _to_booking_out(booking, current_user.full_name, current_user.phone)
 
 
@@ -277,6 +413,29 @@ def get_booking(
     customer = db.query(User).filter(User.id == booking.customer_id).first()
     rating = db.query(Rating).filter(Rating.booking_id == booking.id).first()
     return _to_booking_out(booking, customer.full_name, customer.phone, rating)
+
+
+@router.put("/{booking_id}/customer-location", response_model=BookingOut)
+def update_customer_location(
+    booking_id: uuid.UUID,
+    payload: CustomerLocationUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found.")
+    if current_user.role != UserRole.customer or booking.customer_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You don't have permission to update this booking's location.")
+    if booking.status not in _LOCATION_SHARING_STATUSES:
+        raise HTTPException(status_code=400, detail="Customer location can only be shared for an active booking.")
+
+    booking.customer_latitude = payload.latitude
+    booking.customer_longitude = payload.longitude
+    booking.customer_location_updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(booking)
+    return _to_booking_out(booking, current_user.full_name, current_user.phone)
 
 
 @router.put("/{booking_id}/location", response_model=BookingOut)
@@ -392,6 +551,13 @@ def update_booking_status(
 
     booking.status = new_status
 
+    if new_status == BookingStatus.accepted and is_provider:
+        provider_profile = db.query(ProviderProfile).filter(ProviderProfile.user_id == current_user.id).first()
+        if provider_profile and provider_profile.latitude is not None and provider_profile.longitude is not None:
+            booking.provider_latitude = provider_profile.latitude
+            booking.provider_longitude = provider_profile.longitude
+            booking.provider_location_updated_at = provider_profile.location_updated_at or datetime.now(timezone.utc)
+
     # Stop live location sharing the moment a job is marked completed: clear
     # the fields rather than just leaving the frontend to ignore them, so a
     # finished booking can never be polled into showing a stale position.
@@ -401,6 +567,9 @@ def update_booking_status(
         booking.provider_latitude = None
         booking.provider_longitude = None
         booking.provider_location_updated_at = None
+        booking.customer_latitude = None
+        booking.customer_longitude = None
+        booking.customer_location_updated_at = None
 
     customer = db.query(User).filter(User.id == booking.customer_id).first()
     notify_status_change(db, booking, new_status, customer.full_name)
@@ -472,6 +641,60 @@ def update_booking_charges(
     return _to_booking_out(booking, customer.full_name, customer.phone)
 
 
+@router.post("/{booking_id}/payment/cash/received", response_model=BookingOut)
+def mark_cash_received(
+    booking_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """The assigned provider confirms the customer paid them in cash.
+
+    Marks the booking paid (method "cash"), which is exactly what the
+    completion rule checks, so the provider can then mark it completed.
+    Only possible once the provider has arrived, and never on top of an
+    online payment that is paid or still in progress.
+    """
+    # Locked, like the eSewa verification path, so a cash confirmation and an
+    # eSewa result landing together cannot both be applied.
+    booking = db.query(Booking).filter(Booking.id == booking_id).with_for_update().first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found.")
+    if current_user.role != UserRole.provider or booking.provider_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the assigned provider can confirm a cash payment.")
+    if booking.status != BookingStatus.arrived:
+        raise HTTPException(
+            status_code=400,
+            detail="You can confirm a cash payment once you have arrived at the customer's location.",
+        )
+    if booking.payment_status == "paid":
+        raise HTTPException(status_code=409, detail="This booking has already been paid.")
+    _expire_stale_pending(db, booking)
+    if booking.payment_status == "pending":
+        raise HTTPException(
+            status_code=409,
+            detail="The customer is in the middle of an online payment. Wait a few minutes or ask them to cancel it first.",
+        )
+
+    # Drop any unfinished eSewa attempt so it can't flip this booking later.
+    db.query(PaymentAttempt).filter(
+        PaymentAttempt.booking_id == booking.id,
+        PaymentAttempt.status == "pending",
+    ).update({"status": "cancelled"})
+
+    booking.payment_status = "paid"
+    booking.payment_method = "cash"
+    booking.payment_reference = None
+    booking.payment_transaction_uuid = None
+    booking.payment_updated_at = datetime.now(timezone.utc)
+
+    customer = db.query(User).filter(User.id == booking.customer_id).first()
+    notify_cash_received(db, booking, customer.full_name)
+
+    db.commit()
+    db.refresh(booking)
+    return _to_booking_out(booking, customer.full_name, customer.phone)
+
+
 def _get_customer_booking(db: Session, booking_id: uuid.UUID, current_user: User) -> Booking:
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
@@ -482,18 +705,14 @@ def _get_customer_booking(db: Session, booking_id: uuid.UUID, current_user: User
 
 
 def _apply_esewa_response(db: Session, attempt: PaymentAttempt, response_data: dict) -> PaymentAttempt:
-    """Verify the signed response and eSewa's authoritative status."""
+    """Verify the signed response and eSewa's authoritative status.
+
+    A booking is only ever marked paid when eSewa's own status API reports
+    COMPLETE for this exact transaction, product and amount. The redirect
+    data from the app is never trusted on its own.
+    """
     if not verify_response_signature(response_data):
         raise HTTPException(status_code=400, detail="Invalid eSewa response signature.")
-
-    booking = db.query(Booking).filter(Booking.id == attempt.booking_id).with_for_update().first()
-    if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found.")
-
-    # Both the app's /verify call and eSewa's server callback can land here
-    # for the same payment; only the first one to flip it to "paid" should
-    # notify, so remember whether it already was (the row is locked above).
-    was_already_paid = booking.payment_status == "paid"
 
     transaction_uuid = str(response_data.get("transaction_uuid", ""))
     product_code = str(response_data.get("product_code", ""))
@@ -502,13 +721,22 @@ def _apply_esewa_response(db: Session, attempt: PaymentAttempt, response_data: d
         total_amount = Decimal(str(response_data.get("total_amount", "0")).replace(",", "")).quantize(Decimal("0.01"))
     except Exception:
         raise HTTPException(status_code=400, detail="eSewa returned an invalid amount.")
-    expected_total = (Decimal(str(booking.price or 0)) + Decimal(str(booking.extra_charges or 0))).quantize(Decimal("0.01"))
 
     if transaction_uuid != attempt.transaction_uuid or product_code != settings.esewa_product_code:
         raise HTTPException(status_code=400, detail="eSewa transaction does not match this booking.")
-    if total_amount != expected_total or total_amount != attempt.amount:
+    # The attempt's amount was fixed server-side when the payment started.
+    if total_amount != Decimal(str(attempt.amount)).quantize(Decimal("0.01")):
         raise HTTPException(status_code=400, detail="eSewa amount does not match the booking total.")
 
+    # Already confirmed (e.g. the app's /verify call and eSewa's server
+    # callback both arrive): nothing more to ask eSewa.
+    if attempt.status == "paid":
+        return attempt
+
+    # Ask eSewa BEFORE locking the booking row. This is a slow network call;
+    # holding the lock across it blocks every other write to the booking,
+    # including the live-location updates emergency bookings send every few
+    # seconds, which stalls them and can make this very request time out.
     try:
         status_response = status_check(transaction_uuid, total_amount)
     except PaymentGatewayError:
@@ -528,6 +756,20 @@ def _apply_esewa_response(db: Session, attempt: PaymentAttempt, response_data: d
     if status_amount is not None and Decimal(str(status_amount).replace(",", "")).quantize(Decimal("0.01")) != total_amount:
         raise HTTPException(status_code=400, detail="eSewa status response has the wrong amount.")
 
+    # Now take the row lock, only for the short write.
+    booking = db.query(Booking).filter(Booking.id == attempt.booking_id).with_for_update().first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found.")
+    db.refresh(attempt)
+    expected_total = (Decimal(str(booking.price or 0)) + Decimal(str(booking.extra_charges or 0))).quantize(Decimal("0.01"))
+    if total_amount != expected_total:
+        raise HTTPException(status_code=400, detail="eSewa amount does not match the booking total.")
+
+    # Both the app's /verify call and eSewa's server callback can land here
+    # for the same payment; only the first one to flip it to "paid" should
+    # notify, so remember whether it already was (the row is locked above).
+    was_already_paid = booking.payment_status == "paid"
+
     attempt.raw_response = json.dumps({"redirect": response_data, "status_check": status_response})
     attempt.reference = (status_response.get("ref_id") or status_response.get("refId")
                          or response_data.get("transaction_code"))
@@ -545,6 +787,7 @@ def _apply_esewa_response(db: Session, attempt: PaymentAttempt, response_data: d
         booking.payment_status = "paid"
         booking.payment_transaction_uuid = attempt.transaction_uuid
         booking.payment_reference = attempt.reference
+        booking.payment_method = "esewa"
     elif booking.payment_status != "paid":
         booking.payment_status = attempt.status
         if attempt.status in {"cancelled", "failed"}:
@@ -696,8 +939,9 @@ def esewa_success_callback(
             PaymentAttempt.transaction_uuid == transaction_uuid,
         ).first()
         if attempt:
-            _apply_esewa_response(db, attempt, response_data)
-            return _esewa_callback_html("Payment verified", "Your GharSewa payment was verified successfully.")
+            confirmed = _apply_esewa_response(db, attempt, response_data)
+            if confirmed.status == "paid":
+                return _esewa_callback_html("Payment verified", "Your GharSewa payment was verified successfully.")
     except Exception:
         db.rollback()
     return _esewa_callback_html("Payment verification pending", "Please return to GharSewa and check the payment status.")
@@ -714,14 +958,17 @@ def esewa_failure_callback(
         PaymentAttempt.booking_id == booking_id,
         PaymentAttempt.transaction_uuid == transaction_uuid,
     ).first()
-    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    # Only a real, still-open attempt can be failed. Without this check anyone
+    # who knew a booking id could mark its payment as failed, and a late
+    # callback for an old attempt could clobber a newer one in progress.
     if attempt and attempt.status == "pending":
         attempt.status = "failed"
-    if booking and booking.payment_status != "paid":
-        booking.payment_status = "failed"
-        booking.payment_transaction_uuid = None
-        booking.payment_updated_at = datetime.now(timezone.utc)
-    db.commit()
+        booking = db.query(Booking).filter(Booking.id == booking_id).with_for_update().first()
+        if booking and booking.payment_status != "paid" and booking.payment_transaction_uuid == attempt.transaction_uuid:
+            booking.payment_status = "failed"
+            booking.payment_transaction_uuid = None
+            booking.payment_updated_at = datetime.now(timezone.utc)
+        db.commit()
     return _esewa_callback_html("Payment not completed", "The eSewa payment was cancelled or failed. No booking completion was recorded.")
 
 

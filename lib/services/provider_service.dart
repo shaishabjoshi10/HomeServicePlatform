@@ -192,6 +192,93 @@ class ProviderService {
     }
   }
 
+  /// Turns emergency availability on or off. Turning it ON sends the device's
+  /// current position together with the flag, so the server saves both at once
+  /// and the provider shows up in customers' live list straight away.
+  static Future<ProviderProfile> setEmergencyAvailability({
+    required String accessToken,
+    required bool available,
+    double? latitude,
+    double? longitude,
+  }) async {
+    http.Response response;
+    try {
+      response = await http
+          .put(
+        Uri.parse('$apiBaseUrl/api/profile/me/availability'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $accessToken',
+        },
+        body: jsonEncode({
+          'availability': available,
+          if (available && latitude != null) 'latitude': latitude,
+          if (available && longitude != null) 'longitude': longitude,
+        }),
+      )
+          .timeout(const Duration(seconds: 15));
+    } on TimeoutException {
+      throw ProviderServiceException('Request timed out. Please check your connection.');
+    } catch (_) {
+      throw ProviderServiceException('Unable to reach the server. Please check your connection.');
+    }
+
+    if (response.statusCode == 401) {
+      throw ProviderServiceException('Your session has expired. Please log in again.');
+    }
+    if (response.statusCode != 200) {
+      throw ProviderServiceException(_extractDetail(response) ?? 'Failed to update your availability.');
+    }
+
+    try {
+      return ProviderProfile.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    } catch (_) {
+      throw ProviderServiceException('Unexpected response from server.');
+    }
+  }
+
+  /// Publishes the provider's latest device location. The backend uses this
+  /// location for the customer's emergency nearby-provider search.
+  static Future<ProviderProfile> updateCurrentLocation({
+    required String accessToken,
+    required double latitude,
+    required double longitude,
+  }) async {
+    http.Response response;
+    try {
+      response = await http
+          .put(
+        Uri.parse('$apiBaseUrl/api/profile/me/location'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $accessToken',
+        },
+        body: jsonEncode({
+          'latitude': latitude,
+          'longitude': longitude,
+        }),
+      )
+          .timeout(const Duration(seconds: 15));
+    } on TimeoutException {
+      throw ProviderServiceException('Location update timed out.');
+    } catch (_) {
+      throw ProviderServiceException('Unable to update your location.');
+    }
+
+    if (response.statusCode == 401) {
+      throw ProviderServiceException('Your session has expired. Please log in again.');
+    }
+    if (response.statusCode != 200) {
+      throw ProviderServiceException(_extractDetail(response) ?? 'Failed to update your location.');
+    }
+
+    try {
+      return ProviderProfile.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+    } catch (_) {
+      throw ProviderServiceException('Unexpected response from server.');
+    }
+  }
+
   /// Uploads the front and/or back citizenship photo via
   /// POST /api/profile/me/documents/citizenship (multipart). Pass either
   /// or both files — whichever side changed.

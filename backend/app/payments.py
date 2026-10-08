@@ -59,6 +59,12 @@ def decode_response(encoded_data: str) -> dict:
     return value
 
 
+# eSewa's status API normally answers in well under a second. Keep each host's
+# timeout short so the worst case (every host down) stays inside the app's
+# request timeout instead of leaving the customer staring at a spinner.
+STATUS_CHECK_TIMEOUT_SECONDS = 6
+
+
 class PaymentGatewayError(Exception):
     """eSewa could not be reached or gave an unusable answer."""
 
@@ -75,7 +81,7 @@ def status_check(transaction_uuid: str, total_amount: Decimal) -> dict:
     for base in settings.esewa_status_urls:
         url = f"{base.rstrip('/')}/?{query}"
         try:
-            with urlopen(Request(url, method="GET"), timeout=15) as response:
+            with urlopen(Request(url, method="GET"), timeout=STATUS_CHECK_TIMEOUT_SECONDS) as response:
                 return json.loads(response.read().decode("utf-8"))
         except Exception as exc:  # network, HTTP error, bad JSON...
             logger.warning("eSewa status check failed at %s: %r", base, exc)

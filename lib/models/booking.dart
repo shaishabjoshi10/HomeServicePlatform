@@ -1,3 +1,4 @@
+import '../utils/nepal_time.dart';
 import 'service_job.dart';
 
 class Booking {
@@ -26,12 +27,18 @@ class Booking {
   final double? totalAmount;
   final String paymentStatus; // unpaid | pending | paid | failed | cancelled | refunded
   final String? paymentReference;
+  final String? paymentMethod; // esewa | cash (once paid)
   final String address;
   final double? latitude;
   final double? longitude;
   final String? problemDescription;
   final String? notes;
   final DateTime? preferredDate;
+
+  /// [preferredDate] as Nepal (Asia/Kathmandu) wall-clock time. Use this, not
+  /// [preferredDate], whenever the scheduled date or time is shown, so the
+  /// customer and the provider always see the same value.
+  DateTime? get preferredDateNepal => preferredDate == null ? null : toNepalTime(preferredDate!);
   final String status; // pending | accepted | rejected | on_the_way | arrived | completed | cancelled
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -42,6 +49,10 @@ class Booking {
   final double? providerLatitude;
   final double? providerLongitude;
   final DateTime? providerLocationUpdatedAt;
+  final double? customerLatitude;
+  final double? customerLongitude;
+  final DateTime? customerLocationUpdatedAt;
+  final bool isEmergency;
 
   final int? ratingStars; // 1-5 once the customer has rated the service for this booking, else null
   final String? ratingComment;
@@ -66,6 +77,7 @@ class Booking {
     this.totalAmount,
     this.paymentStatus = 'unpaid',
     this.paymentReference,
+    this.paymentMethod,
     this.latitude,
     this.longitude,
     this.problemDescription,
@@ -74,6 +86,10 @@ class Booking {
     this.providerLatitude,
     this.providerLongitude,
     this.providerLocationUpdatedAt,
+    this.customerLatitude,
+    this.customerLongitude,
+    this.customerLocationUpdatedAt,
+    this.isEmergency = false,
     this.ratingStars,
     this.ratingComment,
     this.ratedAt,
@@ -112,6 +128,7 @@ class Booking {
       totalAmount: (json['total_amount'] as num?)?.toDouble(),
       paymentStatus: json['payment_status'] as String? ?? 'unpaid',
       paymentReference: json['payment_reference'] as String?,
+      paymentMethod: json['payment_method'] as String?,
       address: json['address'] as String,
       latitude: (json['latitude'] as num?)?.toDouble(),
       longitude: (json['longitude'] as num?)?.toDouble(),
@@ -126,6 +143,12 @@ class Booking {
       providerLocationUpdatedAt: json['provider_location_updated_at'] != null
           ? DateTime.parse(json['provider_location_updated_at'] as String)
           : null,
+      customerLatitude: (json['customer_latitude'] as num?)?.toDouble(),
+      customerLongitude: (json['customer_longitude'] as num?)?.toDouble(),
+      customerLocationUpdatedAt: json['customer_location_updated_at'] != null
+          ? DateTime.parse(json['customer_location_updated_at'] as String)
+          : null,
+      isEmergency: json['is_emergency'] as bool? ?? false,
       ratingStars: json['rating_stars'] as int?,
       ratingComment: json['rating_comment'] as String?,
       ratedAt: json['rated_at'] != null ? DateTime.parse(json['rated_at'] as String) : null,

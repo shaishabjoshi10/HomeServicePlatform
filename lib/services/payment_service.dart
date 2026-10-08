@@ -33,34 +33,34 @@ class EsewaPaymentInit {
   });
 
   factory EsewaPaymentInit.fromJson(Map<String, dynamic> json) => EsewaPaymentInit(
-        bookingId: json['booking_id'].toString(),
-        transactionUuid: json['transaction_uuid'] as String,
-        amount: (json['amount'] as num).toDouble(),
-        extraCharges: (json['extra_charges'] as num).toDouble(),
-        totalAmount: (json['total_amount'] as num).toDouble(),
-        formUrl: json['form_url'] as String,
-        fields: (json['fields'] as Map<String, dynamic>).map(
+    bookingId: json['booking_id'].toString(),
+    transactionUuid: json['transaction_uuid'] as String,
+    amount: (json['amount'] as num).toDouble(),
+    extraCharges: (json['extra_charges'] as num).toDouble(),
+    totalAmount: (json['total_amount'] as num).toDouble(),
+    formUrl: json['form_url'] as String,
+    fields: (json['fields'] as Map<String, dynamic>).map(
           (key, value) => MapEntry(key, value.toString()),
-        ),
-      );
+    ),
+  );
 }
 
 class PaymentService {
   static String _base(String bookingId) => '$apiBaseUrl/api/bookings/$bookingId/payment/esewa';
 
   static Map<String, String> _headers(String token) => {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      };
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer $token',
+  };
 
   static Future<EsewaPaymentInit> initiate({
     required String accessToken,
     required String bookingId,
   }) async {
     final response = await _send(() => http.post(
-          Uri.parse('${_base(bookingId)}/initiate'),
-          headers: _headers(accessToken),
-        ));
+      Uri.parse('${_base(bookingId)}/initiate'),
+      headers: _headers(accessToken),
+    ));
     _check(response, 200);
     return EsewaPaymentInit.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
@@ -70,11 +70,17 @@ class PaymentService {
     required String bookingId,
     required String data,
   }) async {
-    final response = await _send(() => http.post(
-          Uri.parse('${_base(bookingId)}/verify'),
-          headers: _headers(accessToken),
-          body: jsonEncode({'data': data}),
-        ));
+    // Verification asks eSewa's server to confirm the payment, which can take
+    // longer than an ordinary API call, so give it more time before the app
+    // gives up (the server still finishes the check either way).
+    final response = await _send(
+          () => http.post(
+        Uri.parse('${_base(bookingId)}/verify'),
+        headers: _headers(accessToken),
+        body: jsonEncode({'data': data}),
+      ),
+      timeout: const Duration(seconds: 40),
+    );
     _check(response, 200);
     return Booking.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
@@ -84,9 +90,9 @@ class PaymentService {
     required String bookingId,
   }) async {
     final response = await _send(() => http.post(
-          Uri.parse('${_base(bookingId)}/cancel'),
-          headers: _headers(accessToken),
-        ));
+      Uri.parse('${_base(bookingId)}/cancel'),
+      headers: _headers(accessToken),
+    ));
     _check(response, 200);
     return Booking.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
@@ -98,20 +104,37 @@ class PaymentService {
     String? note,
   }) async {
     final response = await _send(() => http.patch(
-          Uri.parse('$apiBaseUrl/api/bookings/$bookingId/charges'),
-          headers: _headers(accessToken),
-          body: jsonEncode({
-            'extra_charges': extraCharges,
-            if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
-          }),
-        ));
+      Uri.parse('$apiBaseUrl/api/bookings/$bookingId/charges'),
+      headers: _headers(accessToken),
+      body: jsonEncode({
+        'extra_charges': extraCharges,
+        if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+      }),
+    ));
     _check(response, 200);
     return Booking.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
   }
 
-  static Future<http.Response> _send(Future<http.Response> Function() request) async {
+  /// Provider confirms the customer paid them in cash. The booking comes back
+  /// marked paid, so it can then be completed.
+  static Future<Booking> markCashReceived({
+    required String accessToken,
+    required String bookingId,
+  }) async {
+    final response = await _send(() => http.post(
+      Uri.parse('$apiBaseUrl/api/bookings/$bookingId/payment/cash/received'),
+      headers: _headers(accessToken),
+    ));
+    _check(response, 200);
+    return Booking.fromJson(jsonDecode(response.body) as Map<String, dynamic>);
+  }
+
+  static Future<http.Response> _send(
+      Future<http.Response> Function() request, {
+        Duration timeout = const Duration(seconds: 20),
+      }) async {
     try {
-      return await request().timeout(const Duration(seconds: 20));
+      return await request().timeout(timeout);
     } on TimeoutException {
       throw PaymentServiceException('Request timed out. Please check your connection.');
     } catch (_) {

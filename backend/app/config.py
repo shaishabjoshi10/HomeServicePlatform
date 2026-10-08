@@ -59,10 +59,6 @@ class Settings(BaseSettings):
         ]
 
     @property
-    def esewa_status_url(self) -> str:
-        return self.esewa_status_urls[0]
-
-    @property
     def cors_origins(self) -> list[str]:
         if self.allowed_origins.strip() == "*":
             return ["*"]

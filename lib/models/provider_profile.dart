@@ -15,6 +15,9 @@ class ProviderProfile {
   final String? profilePictureUrl;
   final String verificationStatus;
   final bool availability;
+  final double? latitude;
+  final double? longitude;
+  final DateTime? locationUpdatedAt;
 
   ProviderProfile({
     required this.id,
@@ -23,6 +26,9 @@ class ProviderProfile {
     required this.city,
     required this.verificationStatus,
     required this.availability,
+    this.latitude,
+    this.longitude,
+    this.locationUpdatedAt,
     this.serviceCategory,
     this.experience,
     this.bio,
@@ -65,6 +71,9 @@ class ProviderProfile {
       city: city,
       verificationStatus: verificationStatus,
       availability: availability,
+      latitude: latitude,
+      longitude: longitude,
+      locationUpdatedAt: locationUpdatedAt,
       serviceCategory: serviceCategory,
       experience: experience,
       bio: bio,
@@ -96,6 +105,11 @@ class ProviderProfile {
       profilePictureUrl: json['profile_picture_url'] as String?,
       verificationStatus: json['verification_status'] as String,
       availability: json['availability'] as bool,
+      latitude: (json['latitude'] as num?)?.toDouble(),
+      longitude: (json['longitude'] as num?)?.toDouble(),
+      locationUpdatedAt: json['location_updated_at'] != null
+          ? DateTime.parse(json['location_updated_at'] as String)
+          : null,
     );
   }
 }

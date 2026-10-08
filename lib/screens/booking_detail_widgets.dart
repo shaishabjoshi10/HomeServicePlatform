@@ -134,13 +134,15 @@ class PaymentStatusBadge extends StatelessWidget {
     final background = paid ? Colors.green.shade50 : Colors.orange.shade50;
     final border = paid ? Colors.green.shade200 : Colors.orange.shade200;
     final label = paid
-        ? 'Paid${booking.paymentReference != null ? ' · Ref ${booking.paymentReference}' : ''}'
+        ? (booking.paymentMethod == 'cash'
+        ? 'Paid in Cash'
+        : 'Paid${booking.paymentReference != null ? ' · Ref ${booking.paymentReference}' : ''}')
         : switch (booking.paymentStatus) {
-            'failed' => 'Payment Failed',
-            'cancelled' => 'Payment Cancelled',
-            'pending' => 'Payment Pending',
-            _ => 'Awaiting Payment',
-          };
+      'failed' => 'Payment Failed',
+      'cancelled' => 'Payment Cancelled',
+      'pending' => 'Payment Pending',
+      _ => 'Awaiting Payment',
+    };
 
     return Container(
       width: double.infinity,
@@ -275,11 +277,11 @@ class AddressInfoRow extends StatelessWidget {
 /// enough to place the job, on demand, via the "View Map" action next to
 /// the (possibly long) address.
 void showBookingLocationMap(
-  BuildContext context, {
-  required String address,
-  required double latitude,
-  required double longitude,
-}) {
+    BuildContext context, {
+      required String address,
+      required double latitude,
+      required double longitude,
+    }) {
   showModalBottomSheet(
     context: context,
     isScrollControlled: true,
